@@ -1,14 +1,17 @@
 /* KeepAwake - keep the PS5 out of rest mode while this payload is running.
 
    The console's idle timer is reset by periodically calling
-   sceSystemServicePowerTick(). The payload also listens on a local TCP
-   port, which serves two purposes:
-     - it guarantees only one instance runs at a time, and
-     - sending the payload a second time (or connecting to the port)
-       stops the running instance, i.e. the payload works as a toggle. */
+   sceSystemServicePowerTick(). The payload also serves a control page on
+   TCP port 9031 (see web.h), which
+     - shows the status and turns Keep Awake on and off from a browser,
+     - guarantees only one instance runs at a time, and
+     - lets a second copy of the payload close the running one. */
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -16,6 +19,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 
@@ -37,6 +41,18 @@ int sceKernelSendNotificationRequest(int, notify_request_t*, size_t, int);
 int sceSystemServicePowerTick(void);
 
 
+static time_t g_started;
+
+
+static time_t
+now_seconds(void) {
+  struct timespec ts;
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec;
+}
+
+
 static void
 notify(const char *fmt, ...) {
   notify_request_t req;
@@ -48,30 +64,105 @@ notify(const char *fmt, ...) {
   va_end(args);
 
   printf("[KeepAwake] %s\n", req.message);
+  fflush(stdout);
   sceKernelSendNotificationRequest(0, &req, sizeof req, 0);
 }
 
 
-/* Ask an already running instance to stop by connecting to its port. */
+#define WEB_CONSOLE "PS5"
+#include "web.h"
+
 static int
-stop_running_instance(void) {
+web_recv(int fd, void *buf, size_t len) {
+  ssize_t rc = recv(fd, buf, len, 0);
+  if(rc < 0) {
+    return (errno == EAGAIN || errno == EWOULDBLOCK) ? WEB_AGAIN : WEB_ERROR;
+  }
+  return rc;
+}
+
+static int
+web_send(int fd, const void *buf, size_t len) {
+  ssize_t rc = send(fd, buf, len, 0);
+  if(rc < 0) {
+    return (errno == EAGAIN || errno == EWOULDBLOCK) ? WEB_AGAIN : WEB_ERROR;
+  }
+  return rc;
+}
+
+static void
+web_sleep_ms(int ms) {
+  usleep(ms * 1000);
+}
+
+static long long
+web_uptime(void) {
+  return now_seconds() - g_started;
+}
+
+static void
+web_get_ip(char *buf, size_t size) {
+  struct ifaddrs *ifs;
+  struct ifaddrs *it;
+
+  buf[0] = 0;
+  if(getifaddrs(&ifs) != 0) {
+    return;
+  }
+
+  for(it = ifs; it; it = it->ifa_next) {
+    if(!it->ifa_addr || it->ifa_addr->sa_family != AF_INET ||
+       !(it->ifa_flags & IFF_UP) || (it->ifa_flags & IFF_LOOPBACK)) {
+      continue;
+    }
+    inet_ntop(AF_INET, &((struct sockaddr_in*)it->ifa_addr)->sin_addr,
+              buf, size);
+    break;
+  }
+
+  freeifaddrs(ifs);
+}
+
+static void
+web_notify(const char *msg) {
+  notify("%s", msg);
+}
+
+
+/* Ask an already running instance to quit. Returns 0 if it confirmed. */
+static int
+quit_running_instance(void) {
   struct sockaddr_in addr;
+  struct timeval tv = {3, 0};
+  char resp[64];
+  ssize_t n;
   int fd;
-  int rc;
 
   if((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
     return -1;
   }
+
+  setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
 
   bzero(&addr, sizeof addr);
   addr.sin_family = AF_INET;
   addr.sin_port = htons(KEEPAWAKE_PORT);
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-  rc = connect(fd, (struct sockaddr*)&addr, sizeof addr);
+  if(connect(fd, (struct sockaddr*)&addr, sizeof addr) != 0 ||
+     send(fd, web_quit_request, sizeof web_quit_request - 1, 0) < 0) {
+    close(fd);
+    return -1;
+  }
+
+  n = recv(fd, resp, sizeof resp - 1, 0);
   close(fd);
 
-  return rc;
+  if(n <= 0) {
+    return -1;
+  }
+  resp[n] = 0;
+  return strstr(resp, " 200 ") ? 0 : -1;
 }
 
 
@@ -93,7 +184,7 @@ open_control_socket(void) {
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
   if(bind(fd, (struct sockaddr*)&addr, sizeof addr) != 0 ||
-     listen(fd, 1) != 0) {
+     listen(fd, 8) != 0) {
     int err = errno;
     close(fd);
     errno = err;
@@ -107,33 +198,43 @@ open_control_socket(void) {
 int
 main(void) {
   struct timeval tv;
+  char ip[32];
   fd_set fds;
   int srv;
+  int cli;
   int rc;
 
   signal(SIGPIPE, SIG_IGN);
 
   if((srv = open_control_socket()) < 0) {
     if(errno == EADDRINUSE) {
-      // Port taken: an instance is already running, so toggle it off.
-      // The running instance shows the "disabled" toast itself.
-      if(stop_running_instance() == 0) {
+      // Port taken: an instance is already running, so close it.
+      // The running instance shows the "closed" toast itself.
+      if(quit_running_instance() == 0) {
         return 0;
       }
+      notify("Keep Awake failed to start:\nport %d is in use", KEEPAWAKE_PORT);
+      return -1;
     }
     notify("Keep Awake failed to start: %s", strerror(errno));
     return -1;
   }
 
-  notify("Keep Awake " KEEPAWAKE_VERSION " enabled\n"
-         "Send the payload again to disable");
+  g_started = now_seconds();
+
+  web_get_ip(ip, sizeof ip);
+  if(ip[0]) {
+    notify("Keep Awake " KEEPAWAKE_VERSION " enabled\n"
+           "Control it at http://%s:%d", ip, KEEPAWAKE_PORT);
+  } else {
+    notify("Keep Awake " KEEPAWAKE_VERSION " enabled\n"
+           "Control page on port %d", KEEPAWAKE_PORT);
+  }
 
   while(1) {
-    sceSystemServicePowerTick();
-
     FD_ZERO(&fds);
     FD_SET(srv, &fds);
-    tv.tv_sec = KEEPAWAKE_TICK_SECONDS;
+    tv.tv_sec = ka_tick();
     tv.tv_usec = 0;
 
     rc = select(srv + 1, &fds, NULL, NULL, &tv);
@@ -146,13 +247,16 @@ main(void) {
     }
 
     if(rc > 0 && FD_ISSET(srv, &fds)) {
-      // Any incoming connection is a request to stop.
-      int cli = accept(srv, NULL, NULL);
-      if(cli >= 0) {
-        close(cli);
+      if((cli = accept(srv, NULL, NULL)) < 0) {
+        continue;
       }
-      notify("Keep Awake " KEEPAWAKE_VERSION " disabled");
-      break;
+      fcntl(cli, F_SETFL, fcntl(cli, F_GETFL) | O_NONBLOCK);
+      rc = web_handle_client(cli);
+      close(cli);
+      if(rc) {
+        notify("Keep Awake " KEEPAWAKE_VERSION " closed");
+        break;
+      }
     }
   }
 

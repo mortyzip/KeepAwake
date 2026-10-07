@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Keep Awake</title>
+<style>
+:root {
+  --bg: #f4f5f7;
+  --card: #ffffff;
+  --text: #16181d;
+  --muted: #5d6470;
+  --line: #e3e6eb;
+  --accent: #0f9d76;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(15, 157, 118, .14);
+  --danger: #c93a3a;
+  --danger-soft: rgba(201, 58, 58, .1);
+  --off: #9aa1ab;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1014;
+    --card: #171a20;
+    --text: #eef0f3;
+    --muted: #9aa1ad;
+    --line: #262a32;
+    --accent: #2fd3a0;
+    --accent-ink: #062a1f;
+    --accent-soft: rgba(47, 211, 160, .14);
+    --danger: #ff6b6b;
+    --danger-soft: rgba(255, 107, 107, .12);
+    --off: #5f6672;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: flex;
+  justify-content: center;
+  padding: 40px 16px;
+}
+main { width: 100%; max-width: 420px; }
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+h2 { font-size: 16px; font-weight: 650; margin: 0; }
+.chip {
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 28px 24px 24px;
+}
+.card + .card { margin-top: 16px; }
+.status { display: flex; align-items: center; gap: 16px; }
+.dot {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+}
+.dot::after {
+  content: "";
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.on .dot { animation: pulse 2.4s ease-in-out infinite; }
+.card:not(.on) .dot { background: var(--line); }
+.card:not(.on) .dot::after { background: var(--off); }
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); }
+  50% { box-shadow: 0 0 0 10px transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .on .dot { animation: none; } }
+.state { font-size: 22px; font-weight: 650; margin: 0; }
+.detail { color: var(--muted); margin: 2px 0 0; }
+dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin: 24px 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+dl div { background: var(--card); padding: 12px 14px; }
+dl div.wide { grid-column: span 2; }
+dt { font-size: 13px; color: var(--muted); }
+dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.closed dl, .lost dl, .loading dl { opacity: .5; }
+button {
+  width: 100%;
+  font: inherit;
+  font-weight: 600;
+  padding: 13px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: transparent;
+}
+button:hover:not(:disabled) { background: var(--line); }
+button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.06); }
+button:disabled { opacity: .6; cursor: default; }
+button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+button.link {
+  width: auto;
+  display: block;
+  margin: 14px auto 0;
+  padding: 6px 10px;
+  border: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+button.link:hover:not(:disabled) { background: none; color: var(--danger); }
+button.link.confirm { color: var(--danger); font-weight: 600; }
+.note { color: var(--muted); font-size: 14px; margin: 14px 2px 0; text-align: center; }
+.phone { display: flex; align-items: center; gap: 20px; padding: 20px; }
+.phone p { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
+.qr {
+  flex: none;
+  width: 132px;
+  height: 132px;
+  background: #fff;   /* always light, so scanners read it in dark mode too */
+  border-radius: 10px;
+  padding: 6px;
+}
+.qr svg { display: block; width: 100%; height: 100%; }
+.url { font-size: 14px; font-weight: 600; word-break: break-all; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Keep Awake</h1>
+    <span class="chip" id="version">&nbsp;</span>
+  </header>
+
+  <section class="card loading" id="card" aria-live="polite">
+    <div class="status">
+      <div class="dot" aria-hidden="true"></div>
+      <div>
+        <p class="state" id="state">Connecting…</p>
+        <p class="detail" id="detail">Checking the console</p>
+      </div>
+    </div>
+
+    <dl>
+      <div><dt id="since-label">On for</dt><dd id="since">–</dd></div>
+      <div><dt>Console</dt><dd id="console">–</dd></div>
+      <div class="wide"><dt>Idle timer reset</dt><dd id="interval">–</dd></div>
+    </dl>
+
+    <button type="button" id="toggle" disabled>Turn off</button>
+    <button type="button" class="link" id="quit" hidden>Close Keep Awake</button>
+  </section>
+
+  <section class="card phone" id="phone" hidden>
+    <div class="qr" id="qr" role="img" aria-label="QR code for this page"></div>
+    <div>
+      <h2>Control from your phone</h2>
+      <p>Scan with your phone's camera, or open:</p>
+      <div class="url" id="url"></div>
+    </div>
+  </section>
+
+  <p class="note" id="note" hidden>To start it again, send the payload again.</p>
+</main>
+
+<script>
+/* QR-BEGIN
+   Minimal QR code encoder: byte mode, error correction level M,
+   versions 1-6 (up to 106 bytes). Follows the structure of Project Nayuki's
+   QR Code generator. qrEncode(text, mask?) returns a square array of rows of
+   booleans (true = dark). */
+var qrEncode = (function () {
+  var ECC = [0, 10, 16, 26, 18, 24, 16];   // EC codewords per block, level M
+  var BLOCKS = [0, 1, 1, 1, 2, 2, 4];      // number of blocks, level M
+
+  function rawModules(v) {
+    var r = (16 * v + 128) * v + 64;
+    if (v >= 2) { var n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; }
+    return r;
+  }
+  function dataCodewords(v) { return Math.floor(rawModules(v) / 8) - ECC[v] * BLOCKS[v]; }
+
+  function gfMul(x, y) {
+    var z = 0;
+    for (var i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11d); z ^= ((y >>> i) & 1) * x; }
+    return z;
+  }
+  function rsDivisor(deg) {
+    var r = []; for (var i = 0; i < deg - 1; i++) r.push(0); r.push(1);
+    var root = 1;
+    for (i = 0; i < deg; i++) {
+      for (var j = 0; j < r.length; j++) { r[j] = gfMul(r[j], root); if (j + 1 < r.length) r[j] ^= r[j + 1]; }
+      root = gfMul(root, 2);
+    }
+    return r;
+  }
+  function rsRemainder(data, div) {
+    var r = div.map(function () { return 0; });
+    data.forEach(function (b) {
+      var f = b ^ r.shift(); r.push(0);
+      div.forEach(function (c, i) { r[i] ^= gfMul(c, f); });
+    });
+    return r;
+  }
+
+  return function (text, forceMask) {
+    var bytes = Array.prototype.slice.call(new TextEncoder().encode(text));
+    for (var v = 1; v <= 6 && bytes.length + 2 > dataCodewords(v); v++);
+    if (v > 6) throw new Error("text too long for QR");
+
+    // Data bit stream: byte mode, length, data, terminator, padding.
+    var bits = [], cap = dataCodewords(v) * 8;
+    function put(val, len) { for (var i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); }
+    put(4, 4); put(bytes.length, 8); bytes.forEach(function (b) { put(b, 8); });
+    put(0, Math.min(4, cap - bits.length));
+    put(0, (8 - bits.length % 8) % 8);
+    for (var pad = 0xec; bits.length < cap; pad ^= 0xec ^ 0x11) put(pad, 8);
+    var data = [];
+    for (var i = 0; i < bits.length; i += 8) {
+      var b = 0; for (var k = 0; k < 8; k++) b = (b << 1) | bits[i + k]; data.push(b);
+    }
+
+    // Split into blocks, add error correction, interleave.
+    var nb = BLOCKS[v], ecl = ECC[v], raw = Math.floor(rawModules(v) / 8);
+    var nShort = nb - raw % nb, shortLen = Math.floor(raw / nb), div = rsDivisor(ecl);
+    var blocks = [];
+    for (i = 0, k = 0; i < nb; i++) {
+      var dat = data.slice(k, k + shortLen - ecl + (i < nShort ? 0 : 1));
+      k += dat.length;
+      var ecc = rsRemainder(dat, div);
+      if (i < nShort) dat.push(0);
+      blocks.push(dat.concat(ecc));
+    }
+    var words = [];
+    for (i = 0; i < blocks[0].length; i++) {
+      blocks.forEach(function (blk, j) { if (i != shortLen - ecl || j >= nShort) words.push(blk[i]); });
+    }
+
+    var size = v * 4 + 17, mod = [], fn = [];
+    for (i = 0; i < size; i++) { mod.push(new Array(size).fill(false)); fn.push(new Array(size).fill(false)); }
+    function setFn(x, y, d) { mod[y][x] = d; fn[y][x] = true; }
+
+    // Function patterns: timing, finders, alignment.
+    for (i = 0; i < size; i++) { setFn(6, i, i % 2 == 0); setFn(i, 6, i % 2 == 0); }
+    [[3, 3], [size - 4, 3], [3, size - 4]].forEach(function (c) {
+      for (var dy = -4; dy <= 4; dy++) for (var dx = -4; dx <= 4; dx++) {
+        var d = Math.max(Math.abs(dx), Math.abs(dy)), x = c[0] + dx, y = c[1] + dy;
+        if (x >= 0 && x < size && y >= 0 && y < size) setFn(x, y, d != 2 && d != 4);
+      }
+    });
+    if (v >= 2) {
+      var pos = [6, size - 7];
+      pos.forEach(function (ax, ai) { pos.forEach(function (ay, aj) {
+        if ((ai == 0 && aj == 0) || (ai == 0 && aj == 1) || (ai == 1 && aj == 0)) return;
+        for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++)
+          setFn(ax + dx, ay + dy, Math.max(Math.abs(dx), Math.abs(dy)) != 1);
+      }); });
+    }
+    function drawFormat(mask) {
+      var d = (0 << 3) | mask, r = d;   // level M = 0b00
+      for (var i = 0; i < 10; i++) r = (r << 1) ^ ((r >>> 9) * 0x537);
+      var f = ((d << 10) | r) ^ 0x5412;
+      function bit(i) { return ((f >>> i) & 1) != 0; }
+      for (i = 0; i <= 5; i++) setFn(8, i, bit(i));
+      setFn(8, 7, bit(6)); setFn(8, 8, bit(7)); setFn(7, 8, bit(8));
+      for (i = 9; i < 15; i++) setFn(14 - i, 8, bit(i));
+      for (i = 0; i < 8; i++) setFn(size - 1 - i, 8, bit(i));
+      for (i = 8; i < 15; i++) setFn(8, size - 15 + i, bit(i));
+      setFn(8, size - 8, true);
+    }
+    drawFormat(0);   // reserve the format areas before placing data
+
+    // Place data in the zigzag order.
+    for (var right = size - 1, n = 0; right >= 1; right -= 2) {
+      if (right == 6) right = 5;
+      for (var vert = 0; vert < size; vert++) for (var j = 0; j < 2; j++) {
+        var x = right - j, y = ((right + 1) & 2) == 0 ? size - 1 - vert : vert;
+        if (!fn[y][x] && n < words.length * 8) { mod[y][x] = ((words[n >>> 3] >>> (7 - (n & 7))) & 1) != 0; n++; }
+      }
+    }
+
+    var MASKS = [
+      function (x, y) { return (x + y) % 2 == 0; },
+      function (x, y) { return y % 2 == 0; },
+      function (x, y) { return x % 3 == 0; },
+      function (x, y) { return (x + y) % 3 == 0; },
+      function (x, y) { return (Math.floor(x / 3) + Math.floor(y / 2)) % 2 == 0; },
+      function (x, y) { return x * y % 2 + x * y % 3 == 0; },
+      function (x, y) { return (x * y % 2 + x * y % 3) % 2 == 0; },
+      function (x, y) { return ((x + y) % 2 + x * y % 3) % 2 == 0; }
+    ];
+    function applyMask(m) {
+      for (var y = 0; y < size; y++) for (var x = 0; x < size; x++)
+        if (!fn[y][x] && MASKS[m](x, y)) mod[y][x] = !mod[y][x];
+    }
+
+    // Penalty score (runs, 2x2 blocks, finder-like patterns, balance), as in
+    // the QR spec, to pick the most readable mask.
+    function penalty() {
+      var score = 0, dark = 0;
+      function lineScore(get) {
+        var s = 0;
+        for (var a = 0; a < size; a++) {
+          var run = 0, prev = null, seq = [];
+          for (var b = 0; b < size; b++) {
+            var c = get(a, b);
+            if (c === prev) { run++; } else { if (run >= 5) s += run - 2; run = 1; prev = c; }
+            seq.push(c ? 1 : 0);
+          }
+          if (run >= 5) s += run - 2;
+          var line = seq.join("");
+          var re = /(?=(10111010000|00001011101))/g;
+          while (re.exec(line)) { s += 40; re.lastIndex++; }
+        }
+        return s;
+      }
+      score += lineScore(function (a, b) { return mod[a][b]; });
+      score += lineScore(function (a, b) { return mod[b][a]; });
+      for (var y = 0; y < size - 1; y++) for (var x = 0; x < size - 1; x++) {
+        var c = mod[y][x];
+        if (c == mod[y][x + 1] && c == mod[y + 1][x] && c == mod[y + 1][x + 1]) score += 3;
+      }
+      for (y = 0; y < size; y++) for (x = 0; x < size; x++) if (mod[y][x]) dark++;
+      var total = size * size;
+      score += Math.floor(Math.abs(dark * 20 - total * 10) / total) * 10;
+      return score;
+    }
+
+    var best = forceMask, bestScore = Infinity;
+    if (best === undefined) {
+      for (var m = 0; m < 8; m++) {
+        applyMask(m); drawFormat(m);
+        var s = penalty();
+        if (s < bestScore) { best = m; bestScore = s; }
+        applyMask(m);
+      }
+    }
+    applyMask(best); drawFormat(best);
+    return mod;
+  };
+})();
+/* QR-END */
+</script>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var card = $("card"), toggle = $("toggle"), quit = $("quit");
+  var view = "loading", info = null, baseSince = 0, baseAt = 0;
+  var pollTimer = null, quitTimer = null, busy = false, shownUrl = null;
+
+  function formatDuration(s) {
+    var d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24,
+        m = Math.floor(s / 60) % 60, sec = s % 60;
+    if (d) return d + "d " + h + "h";
+    if (h) return h + "h " + m + "m";
+    if (m) return m + "m " + sec + "s";
+    return sec + "s";
+  }
+
+  function setText(id, text) { $(id).textContent = text; }
+
+  function render() {
+    card.className = "card " + view;
+    var name = info ? info.console : "console";
+    var texts = {
+      loading: ["Connecting…", "Checking the console"],
+      on: ["On", "Keeping your " + name + " awake"],
+      off: ["Off", "Your " + name + " can go into rest mode"],
+      closed: ["Closed", "Keep Awake has stopped running"],
+      lost: ["Not running", "Keep Awake isn't responding"]
+    }[view];
+    setText("state", texts[0]);
+    setText("detail", texts[1]);
+
+    if (info) {
+      setText("version", info.version);
+      setText("console", info.console);
+      setText("since-label", info.active ? "On for" : "Off for");
+      setText("interval", info.active ? "Every " + info.interval + " seconds" : "Paused");
+    }
+    tick();
+
+    var live = view === "on" || view === "off";
+    toggle.disabled = busy || view === "loading";
+    toggle.className = view === "off" ? "primary" : "";
+    toggle.textContent = view === "on" ? "Turn off" : view === "off" ? "Turn on" : "Check again";
+    quit.hidden = !live;
+    quit.disabled = busy;
+    quit.className = quitTimer ? "link confirm" : "link";
+    quit.textContent = quitTimer ? "Tap again to close Keep Awake" : "Close Keep Awake";
+    $("note").hidden = view !== "closed" && view !== "lost";
+    renderQr();
+  }
+
+  function tick() {
+    if ((view === "on" || view === "off") && info) {
+      setText("since", formatDuration(baseSince + Math.floor((Date.now() - baseAt) / 1000)));
+    }
+  }
+
+  // The address phones should use: this page's own address, unless it was
+  // opened on the console itself, where the console's LAN IP is needed.
+  function phoneUrl() {
+    var host = location.hostname;
+    if (host && host !== "localhost" && host !== "127.0.0.1") {
+      return location.protocol + "//" + location.host + "/";
+    }
+    if (info && info.ip) return "http://" + info.ip + ":" + info.port + "/";
+    return null;
+  }
+
+  function renderQr() {
+    var url = phoneUrl();
+    $("phone").hidden = !url || view === "closed" || view === "lost";
+    if (!url || url === shownUrl) return;
+    shownUrl = url;
+
+    var m = qrEncode(url), n = m.length, d = "";
+    for (var y = 0; y < n; y++) for (var x = 0; x < n; x++)
+      if (m[y][x]) d += "M" + (x + 4) + " " + (y + 4) + "h1v1h-1z";
+    $("qr").innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (n + 8) + " " + (n + 8) +
+      '" shape-rendering="crispEdges"><path fill="#000" d="' + d + '"/></svg>';
+    setText("url", url.replace(/\/$/, ""));
+  }
+
+  function apply(data) {
+    info = data;
+    baseSince = data.since;
+    baseAt = Date.now();
+    view = data.active ? "on" : "off";
+  }
+
+  function request(method, path) {
+    return fetch(path, { method: method, cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw r; return r.json(); });
+  }
+
+  function poll() {
+    clearTimeout(pollTimer);
+    request("GET", "/status")
+      .then(function (data) {
+        if (!busy) { apply(data); render(); }
+        pollTimer = setTimeout(poll, 5000);
+      })
+      .catch(function () {
+        if (view !== "closed") { view = "lost"; render(); }
+      });
+  }
+
+  function act(path) {
+    busy = true;
+    render();
+    return request("POST", path).then(
+      function (data) { busy = false; return data; },
+      function (e) { busy = false; throw e; });
+  }
+
+  toggle.addEventListener("click", function () {
+    if (view === "on" || view === "off") {
+      act(view === "on" ? "/off" : "/on")
+        .then(function (data) { apply(data); render(); })
+        .catch(poll);
+    } else {
+      view = "loading";
+      render();
+      poll();
+    }
+  });
+
+  quit.addEventListener("click", function () {
+    if (!quitTimer) {
+      quitTimer = setTimeout(function () { quitTimer = null; render(); }, 3000);
+      render();
+      return;
+    }
+    clearTimeout(quitTimer);
+    quitTimer = null;
+    clearTimeout(pollTimer);
+    act("/quit")
+      .then(function () { view = "closed"; render(); })
+      .catch(poll);
+  });
+
+  setInterval(tick, 1000);
+  poll();
+})();
+</script>
+</body>
+</html>

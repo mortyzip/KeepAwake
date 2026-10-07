@@ -18,10 +18,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install LLVM
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 lld-18 llvm-18
+          sudo apt-get install -y clang-18 lld-18 llvm-18 xxd
           echo "LLVM_CONFIG=/usr/lib/llvm-18/bin/llvm-config" >> "$GITHUB_ENV"
 
       - name: Download SDKs

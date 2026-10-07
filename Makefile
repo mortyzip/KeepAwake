@@ -1,5 +1,5 @@
-# Payload Manager reads the version from the filename, e.g. keepawake_ps5_v1.0.0.elf
-VERSION := 1.0.0
+# Payload Manager reads the version from the filename, e.g. keepawake_ps5_v1.1.0.elf
+VERSION := 1.1.0
 
 PS5_PAYLOAD_SDK ?= $(abspath ../ps5-payload-sdk)
 PS4SDK          ?= $(abspath ../ps4-payload-sdk)
@@ -19,7 +19,10 @@ LLVM_PFX := $(if $(LLVM_BIN),$(LLVM_BIN)/)
 PS5_ELF := keepawake_ps5_v$(VERSION).elf
 PS4_BIN := keepawake_ps4_v$(VERSION).bin
 
-DEFINES := -DKEEPAWAKE_VERSION=\"v$(VERSION)\"
+# The control page is embedded into the payloads as a C array.
+PAGE_H  := build/index_html.h
+DEPS    := src/web.h $(PAGE_H)
+DEFINES := -DKEEPAWAKE_VERSION=\"v$(VERSION)\" -Ibuild
 
 # PS5: ELF for the ps5-payload-sdk ELF loader.
 PS5_CC     := $(PS5_PAYLOAD_SDK)/bin/prospero-clang
@@ -42,32 +45,43 @@ all: ps5 ps4
 ps5: $(PS5_ELF)
 ps4: $(PS4_BIN)
 
-$(PS5_ELF): src/ps5.c
-	$(PS5_CC) $(PS5_CFLAGS) -o $@ $^
+$(PAGE_H): src/index.html
+	@mkdir -p build
+	cd src && xxd -i index.html > ../$@
 
-$(PS4_BIN): src/ps4.c
-	$(PS4_CC) $(PS4_CFLAGS) -c -o ps4.o src/ps4.c
-	$(PS4_CC) --target=x86_64-unknown-freebsd -c -o ps4_crt0.o $(LIBPS4)/crt0.s
-	$(PS4_LD) -o ps4.elf ps4_crt0.o ps4.o $(PS4_LDFLAGS)
-	$(PS4_OBJCOPY) -O binary ps4.elf $@
-	rm -f ps4.o ps4_crt0.o ps4.elf
+$(PS5_ELF): src/ps5.c $(DEPS)
+	$(PS5_CC) $(PS5_CFLAGS) -o $@ src/ps5.c
+
+$(PS4_BIN): src/ps4.c $(DEPS)
+	@mkdir -p build
+	$(PS4_CC) $(PS4_CFLAGS) -c -o build/ps4.o src/ps4.c
+	$(PS4_CC) --target=x86_64-unknown-freebsd -c -o build/ps4_crt0.o $(LIBPS4)/crt0.s
+	$(PS4_LD) -o build/ps4.elf build/ps4_crt0.o build/ps4.o $(PS4_LDFLAGS)
+	$(PS4_OBJCOPY) -O binary build/ps4.elf $@
+
+# Runs the PS5 code on this computer with the console calls stubbed out, for
+# working on the control page: make host && ./build/keepawake_host
+host: build/keepawake_host
+
+build/keepawake_host: src/ps5.c tools/host_stubs.c $(DEPS)
+	cc -Wall -Werror $(DEFINES) -o $@ src/ps5.c tools/host_stubs.c
 
 version:
 	@echo $(VERSION)
 
 clean:
-	rm -f keepawake*.elf keepawake*.bin ps4.o ps4_crt0.o ps4.elf
+	rm -rf build keepawake*.elf keepawake*.bin
 
 test-ps5: $(PS5_ELF)
-	$(PS5_PAYLOAD_SDK)/bin/prospero-deploy -h $(PS5_HOST) -p $(PS5_PORT) $^
+	$(PS5_PAYLOAD_SDK)/bin/prospero-deploy -h $(PS5_HOST) -p $(PS5_PORT) $<
 
 test-ps4: $(PS4_BIN)
-	nc -w 1 $(PS4_HOST) $(PS4_PORT) < $^
+	nc -w 1 $(PS4_HOST) $(PS4_PORT) < $<
 
-stop-ps5:
-	nc -z $(PS5_HOST) 9031
+quit-ps5:
+	curl -fsS -X POST http://$(PS5_HOST):9031/quit
 
-stop-ps4:
-	nc -z $(PS4_HOST) 9031
+quit-ps4:
+	curl -fsS -X POST http://$(PS4_HOST):9031/quit
 
-.PHONY: all ps5 ps4 version clean test-ps5 test-ps4 stop-ps5 stop-ps4
+.PHONY: all ps5 ps4 host version clean test-ps5 test-ps4 quit-ps5 quit-ps4
