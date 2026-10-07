@@ -13,6 +13,10 @@
      POST /on?minutes=N      keep it awake for N minutes, then turn off
      POST /off               stop keeping it awake, but stay running
      POST /quit              end the payload
+     POST /settings?open_on_start=0|1
+                             whether to open this page in the console's
+                             browser when the payload starts (saved to
+                             KEEPAWAKE_SETTINGS)
 
    The platform source defines WEB_CONSOLE ("PS5" or "PS4") before including
    this file, and implements the functions declared below. Client sockets are
@@ -48,12 +52,54 @@ static void web_notify(const char *msg);
 
 #define KA_MAX_MINUTES  (7 * 24 * 60)
 
+#ifndef KEEPAWAKE_SETTINGS
+#define KEEPAWAKE_SETTINGS "/data/keepawake.cfg"
+#endif
+
 
 static int       ka_active = 1;     // resetting the idle timer?
 static long long ka_changed = 0;    // web_uptime() when on/off last changed
 static long long ka_next_tick = 0;  // web_uptime() when the next tick is due
 static long long ka_until = 0;      // web_uptime() when the timer ends, 0 if none
 static long long ka_minutes = 0;    // length of the current timer
+static int       ka_open_on_start = 1;  // open the page in the console's browser at start
+
+
+static void
+ka_load_settings(void) {
+  char buf[128];
+  int fd;
+  int n;
+
+  if((fd = open(KEEPAWAKE_SETTINGS, O_RDONLY, 0)) < 0) {
+    return;   // no file yet: keep the defaults
+  }
+  n = read(fd, buf, sizeof buf - 1);
+  close(fd);
+
+  if(n > 0) {
+    buf[n] = 0;
+    ka_open_on_start = !strstr(buf, "open_on_start=0");
+  }
+}
+
+
+static int
+ka_save_settings(void) {
+  char buf[64];
+  int fd;
+  int n;
+  int ok;
+
+  n = snprintf(buf, sizeof buf, "open_on_start=%d\n", ka_open_on_start);
+  if((fd = open(KEEPAWAKE_SETTINGS, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0) {
+    return -1;
+  }
+  ok = write(fd, buf, n) == n;
+  close(fd);
+
+  return ok ? 0 : -1;
+}
 
 
 /* "1 hour 30 minutes", "2 hours", "45 minutes" */
@@ -243,10 +289,10 @@ web_respond_status(int fd) {
   snprintf(json, sizeof json,
            "{\"version\":\"%s\",\"console\":\"%s\",\"active\":%s,"
            "\"uptime\":%lld,\"since\":%lld,\"timer\":%s,\"remaining\":%s,"
-           "\"interval\":%d,\"ip\":\"%s\",\"port\":%d}",
+           "\"interval\":%d,\"ip\":\"%s\",\"port\":%d,\"open_on_start\":%s}",
            KEEPAWAKE_VERSION, WEB_CONSOLE, ka_active ? "true" : "false",
            now, now - ka_changed, timer, remaining, KEEPAWAKE_TICK_SECONDS,
-           ip, KEEPAWAKE_PORT);
+           ip, KEEPAWAKE_PORT, ka_open_on_start ? "true" : "false");
   web_respond_json(fd, "200 OK", json);
 }
 
@@ -321,9 +367,26 @@ web_handle_client(int fd) {
     web_respond_json(fd, "200 OK", "{\"quit\":true}");
     return 1;
 
+  } else if(web_route(req, len, "POST", "/settings")) {
+    long long open_on_start;
+    rc = web_query_number(req, len, "open_on_start", &open_on_start);
+    if(rc <= 0 || open_on_start > 1) {
+      web_respond_json(fd, "400 Bad Request",
+                       "{\"error\":\"open_on_start must be 0 or 1\"}");
+    } else {
+      ka_open_on_start = (int)open_on_start;
+      if(ka_save_settings() != 0) {
+        web_respond_json(fd, "500 Internal Server Error",
+                         "{\"error\":\"couldn't save the setting\"}");
+      } else {
+        web_respond_status(fd);
+      }
+    }
+
   } else if(web_route(req, len, "GET", "/on") ||
             web_route(req, len, "GET", "/off") ||
-            web_route(req, len, "GET", "/quit")) {
+            web_route(req, len, "GET", "/quit") ||
+            web_route(req, len, "GET", "/settings")) {
     // Only POST changes anything, so link previews and prefetching can't.
     web_respond_json(fd, "405 Method Not Allowed",
                      "{\"error\":\"use POST\"}");

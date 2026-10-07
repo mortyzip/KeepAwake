@@ -3,7 +3,8 @@
    The console's idle timer is reset by periodically calling
    sceSystemServicePowerTick(). The payload also serves a control page on
    TCP port 9031 (see web.h), which
-     - shows the status and turns Keep Awake on and off from a browser,
+     - shows the status and turns Keep Awake on and off from a browser
+       (and opens in the PS5's browser at start, unless turned off),
      - guarantees only one instance runs at a time, and
      - lets a second copy of the payload close the running one. */
 
@@ -13,6 +14,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -39,6 +41,8 @@ typedef struct notify_request {
 
 int sceKernelSendNotificationRequest(int, notify_request_t*, size_t, int);
 int sceSystemServicePowerTick(void);
+int sceSystemServiceLaunchWebBrowser(const char *uri, void *param);
+int sceUserServiceInitialize(void *param);
 
 
 static time_t g_started;
@@ -126,6 +130,31 @@ web_get_ip(char *buf, size_t size) {
 static void
 web_notify(const char *msg) {
   notify("%s", msg);
+}
+
+
+/* Runs on its own thread, so the control page is served even if launching
+   the browser blocks. */
+static void*
+open_browser_thread(void *arg) {
+  char url[64];
+
+  snprintf(url, sizeof url, "http://127.0.0.1:%d/", KEEPAWAKE_PORT);
+  sceUserServiceInitialize(0);
+  if(sceSystemServiceLaunchWebBrowser(url, 0) != 0) {
+    notify("Keep Awake couldn't open the browser");
+  }
+  return NULL;
+}
+
+
+static void
+open_browser(void) {
+  pthread_t thread;
+
+  if(pthread_create(&thread, NULL, open_browser_thread, NULL) == 0) {
+    pthread_detach(thread);
+  }
 }
 
 
@@ -221,6 +250,7 @@ main(void) {
   }
 
   g_started = now_seconds();
+  ka_load_settings();
 
   web_get_ip(ip, sizeof ip);
   if(ip[0]) {
@@ -229,6 +259,10 @@ main(void) {
   } else {
     notify("Keep Awake " KEEPAWAKE_VERSION " enabled\n"
            "Control page on port %d", KEEPAWAKE_PORT);
+  }
+
+  if(ka_open_on_start) {
+    open_browser();
   }
 
   while(1) {

@@ -17,3 +17,17 @@ sceSystemServicePowerTick(void) {
   fflush(stdout);
   return 0;
 }
+
+
+int
+sceUserServiceInitialize(void *param) {
+  return 0;
+}
+
+
+int
+sceSystemServiceLaunchWebBrowser(const char *uri, void *param) {
+  printf("[KeepAwake] open browser: %s\n", uri);
+  fflush(stdout);
+  return 0;
+}

@@ -105,6 +105,29 @@ make_addr(struct sockaddr_in *addr, unsigned int ip) {
 }
 
 
+/* Runs on its own thread, so the control page is served even if launching
+   the browser blocks. */
+static void*
+open_browser_thread(void *arg) {
+  static char url[64];
+
+  UNUSED(arg);
+  snprintf(url, sizeof url, "http://127.0.0.1:%d/", KEEPAWAKE_PORT);
+  openBrowser(url);
+  return NULL;
+}
+
+
+static void
+open_browser(void) {
+  ScePthread thread;
+
+  if(scePthreadCreate(&thread, NULL, open_browser_thread, NULL, "keepawake_browser") == 0) {
+    scePthreadDetach(thread);
+  }
+}
+
+
 /* Ask an already running instance to quit. Returns 0 if it confirmed. */
 static int
 quit_running_instance(void) {
@@ -175,6 +198,8 @@ _main(struct thread *td) {
   initKernel();
   initLibc();
   initNetwork();
+  initPthread();
+  initSysUtil();
   jailbreak();
   sceNetCtlInit();
 
@@ -196,6 +221,7 @@ _main(struct thread *td) {
   }
 
   g_started = sceKernelGetProcessTime();
+  ka_load_settings();
 
   web_get_ip(ip, sizeof ip);
   if(ip[0]) {
@@ -204,6 +230,10 @@ _main(struct thread *td) {
   } else {
     printf_notification("Keep Awake " KEEPAWAKE_VERSION " enabled\n"
                         "Control page on port %d", KEEPAWAKE_PORT);
+  }
+
+  if(ka_open_on_start) {
+    open_browser();
   }
 
   while(1) {

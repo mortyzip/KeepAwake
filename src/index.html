@@ -169,6 +169,58 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 }
 .custom input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .custom button { width: auto; padding: 11px 18px; }
+.setting { display: flex; align-items: center; gap: 16px; padding: 18px 20px; cursor: pointer; }
+.setting div { flex: 1; }
+.setting strong { display: block; font-weight: 600; }
+.setting span { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+.setting.error span { color: var(--danger); }
+.switch {
+  flex: none;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 46px;
+  height: 28px;
+  margin: 0;
+  border-radius: 14px;
+  background: var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background .15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  transition: transform .15s;
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::after { transform: translateX(18px); }
+.switch:disabled { opacity: .6; cursor: default; }
+.switch:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+.coffee { display: flex; align-items: center; gap: 20px; padding: 20px; }
+.coffee > div { flex: 1; }
+.coffee p { color: var(--muted); font-size: 14px; margin: 4px 0 12px; }
+.coffee .qr { width: 112px; height: 112px; }
+.coffee-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: #ffdd00;   /* Buy Me a Coffee's brand yellow */
+  color: #1a1a1a;
+  font-weight: 650;
+  text-decoration: none;
+}
+.coffee-button:hover { filter: brightness(.96); }
+.coffee-button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 .phone { display: flex; align-items: center; gap: 20px; padding: 20px; }
 .phone p { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
 .qr {
@@ -236,6 +288,27 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
       <h2>Control from your phone</h2>
       <p>Scan with your phone's camera, or open:</p>
       <div class="url" id="url"></div>
+    </div>
+  </section>
+
+  <section class="card setting" id="setting" hidden>
+    <label for="open-on-start" style="display:contents">
+      <div>
+        <strong id="open-on-start-title">Open on the console at start</strong>
+        <span id="open-on-start-note">Shows this page on the TV each time you send the payload</span>
+      </div>
+    </label>
+    <input type="checkbox" class="switch" id="open-on-start" role="switch"
+           aria-labelledby="open-on-start-title" aria-describedby="open-on-start-note">
+  </section>
+
+  <section class="card coffee" id="coffee">
+    <div class="qr" id="coffee-qr" role="img" aria-label="QR code for Buy Me a Coffee" hidden></div>
+    <div>
+      <h2>Buy me a coffee</h2>
+      <p id="coffee-text">Keep Awake is free. If it's useful to you, you can support it with a coffee.</p>
+      <a class="coffee-button" id="coffee-link" href="https://buymeacoffee.com/mortyzip"
+         target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Buy me a coffee</a>
     </div>
   </section>
 
@@ -427,6 +500,7 @@ var qrEncode = (function () {
   var presets = Array.prototype.slice.call(document.querySelectorAll(".presets [data-minutes]"));
   var view = "loading", info = null, baseSince = 0, baseAt = 0;
   var pollTimer = null, quitTimer = null, busy = false, shownUrl = null, expiryPolled = false;
+  var settingBusy = false;
 
   function formatDuration(s) {
     var d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24,
@@ -498,6 +572,13 @@ var qrEncode = (function () {
     quit.textContent = quitTimer ? "Tap again to close Keep Awake" : "Close Keep Awake";
     $("note").hidden = view !== "closed" && view !== "lost";
     renderQr();
+
+    $("setting").hidden = !live || !info;
+    if (info) {
+      setText("open-on-start-title", "Open on the " + info.console + " at start");
+      if (!settingBusy) $("open-on-start").checked = info.open_on_start;
+    }
+    $("open-on-start").disabled = settingBusy;
   }
 
   function tick() {
@@ -553,6 +634,26 @@ var qrEncode = (function () {
   });
   custom.addEventListener("input", function () { $("custom-m").setCustomValidity(""); });
 
+  $("open-on-start").addEventListener("change", function (e) {
+    var want = e.target.checked;
+    settingBusy = true;
+    render();
+    request("POST", "/settings?open_on_start=" + (want ? 1 : 0))
+      .then(function (data) {
+        settingBusy = false;
+        $("setting").classList.remove("error");
+        setText("open-on-start-note", "Shows this page on the TV each time you send the payload");
+        apply(data);
+        render();
+      })
+      .catch(function () {
+        settingBusy = false;
+        $("setting").classList.add("error");
+        setText("open-on-start-note", "Couldn't save this setting. Try again.");
+        render();
+      });
+  });
+
   // The address phones should use: this page's own address, unless it was
   // opened on the console itself, where the console's LAN IP is needed.
   function phoneUrl() {
@@ -570,12 +671,26 @@ var qrEncode = (function () {
     if (!url || url === shownUrl) return;
     shownUrl = url;
 
-    var m = qrEncode(url), n = m.length, d = "";
+    $("qr").innerHTML = qrSvg(url);
+    setText("url", url.replace(/\/$/, ""));
+  }
+
+  function qrSvg(text) {
+    var m = qrEncode(text), n = m.length, d = "";
     for (var y = 0; y < n; y++) for (var x = 0; x < n; x++)
       if (m[y][x]) d += "M" + (x + 4) + " " + (y + 4) + "h1v1h-1z";
-    $("qr").innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (n + 8) + " " + (n + 8) +
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (n + 8) + " " + (n + 8) +
       '" shape-rendering="crispEdges"><path fill="#000" d="' + d + '"/></svg>';
-    setText("url", url.replace(/\/$/, ""));
+  }
+
+  // Paying from the console's browser isn't practical, so on a PlayStation
+  // show a QR code to open the page on a phone instead of a link.
+  if (/PlayStation/i.test(navigator.userAgent)) {
+    var coffeeQr = $("coffee-qr");
+    coffeeQr.innerHTML = qrSvg($("coffee-link").href);
+    coffeeQr.hidden = false;
+    $("coffee-link").hidden = true;
+    setText("coffee-text", "Keep Awake is free. If it's useful to you, scan this with your phone to support it with a coffee.");
   }
 
   function apply(data) {

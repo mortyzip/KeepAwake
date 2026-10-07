@@ -1,5 +1,5 @@
-# Payload Manager reads the version from the filename, e.g. keepawake_ps5_v1.2.0.elf
-VERSION := 1.2.0
+# Payload Manager reads the version from the filename, e.g. keepawake_ps5_v1.3.0.elf
+VERSION := 1.3.0
 
 PS5_PAYLOAD_SDK ?= $(abspath ../ps5-payload-sdk)
 PS4SDK          ?= $(abspath ../ps4-payload-sdk)
@@ -26,7 +26,7 @@ DEFINES := -DKEEPAWAKE_VERSION=\"v$(VERSION)\" -Ibuild
 
 # PS5: ELF for the ps5-payload-sdk ELF loader.
 PS5_CC     := $(PS5_PAYLOAD_SDK)/bin/prospero-clang
-PS5_CFLAGS := -Wall -Werror -O2 -lSceSystemService $(DEFINES)
+PS5_CFLAGS := -Wall -Werror -O2 -lSceSystemService -lSceUserService $(DEFINES)
 
 # PS4: raw binary for GoldHEN's BinLoader, linked against libPS4.
 LIBPS4       := $(PS4SDK)/libPS4
@@ -64,7 +64,7 @@ $(PS4_BIN): src/ps4.c $(DEPS)
 host: build/keepawake_host
 
 build/keepawake_host: src/ps5.c tools/host_stubs.c $(DEPS)
-	cc -Wall -Werror $(DEFINES) -o $@ src/ps5.c tools/host_stubs.c
+	cc -Wall -Werror $(DEFINES) -DKEEPAWAKE_SETTINGS=\"build/keepawake.cfg\" -o $@ src/ps5.c tools/host_stubs.c
 
 version:
 	@echo $(VERSION)
