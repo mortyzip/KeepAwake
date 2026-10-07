@@ -139,6 +139,36 @@ button.link {
 button.link:hover:not(:disabled) { background: none; color: var(--danger); }
 button.link.confirm { color: var(--danger); font-weight: 600; }
 .note { color: var(--muted); font-size: 14px; margin: 14px 2px 0; text-align: center; }
+.progress {
+  display: block;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progress span { display: block; height: 100%; width: 0; background: var(--accent); transition: width 1s linear; }
+.timer-label { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.presets button { padding: 10px 6px; font-size: 15px; }
+.presets button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.custom { display: flex; gap: 8px; align-items: flex-end; margin: -4px 0 16px; }
+.custom label { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); }
+.custom input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+}
+.custom input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.custom button { width: auto; padding: 11px 18px; }
 .phone { display: flex; align-items: center; gap: 20px; padding: 20px; }
 .phone p { color: var(--muted); font-size: 14px; margin: 4px 0 8px; }
 .qr {
@@ -173,8 +203,28 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
     <dl>
       <div><dt id="since-label">On for</dt><dd id="since">–</dd></div>
       <div><dt>Console</dt><dd id="console">–</dd></div>
-      <div class="wide"><dt>Idle timer reset</dt><dd id="interval">–</dd></div>
+      <div class="wide">
+        <dt>Timer</dt><dd id="timer">–</dd>
+        <span class="progress" id="progress" hidden><span id="bar"></span></span>
+      </div>
     </dl>
+
+    <div id="timer-controls" hidden>
+      <p class="timer-label" id="timer-label">Keep awake for</p>
+      <div class="presets" role="group" aria-labelledby="timer-label">
+        <button type="button" data-minutes="30">30 min</button>
+        <button type="button" data-minutes="60">1 hour</button>
+        <button type="button" data-minutes="120">2 hours</button>
+        <button type="button" data-minutes="240">4 hours</button>
+        <button type="button" data-minutes="0">No limit</button>
+        <button type="button" id="custom-toggle" aria-expanded="false" aria-controls="custom">Custom</button>
+      </div>
+      <form class="custom" id="custom" novalidate hidden>
+        <label>Hours<input type="number" id="custom-h" min="0" max="168" step="1" inputmode="numeric" value="1"></label>
+        <label>Minutes<input type="number" id="custom-m" min="0" max="59" step="1" inputmode="numeric" value="30"></label>
+        <button type="submit" class="primary">Start</button>
+      </form>
+    </div>
 
     <button type="button" id="toggle" disabled>Turn off</button>
     <button type="button" class="link" id="quit" hidden>Close Keep Awake</button>
@@ -373,9 +423,10 @@ var qrEncode = (function () {
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
-  var card = $("card"), toggle = $("toggle"), quit = $("quit");
+  var card = $("card"), toggle = $("toggle"), quit = $("quit"), custom = $("custom");
+  var presets = Array.prototype.slice.call(document.querySelectorAll(".presets [data-minutes]"));
   var view = "loading", info = null, baseSince = 0, baseAt = 0;
-  var pollTimer = null, quitTimer = null, busy = false, shownUrl = null;
+  var pollTimer = null, quitTimer = null, busy = false, shownUrl = null, expiryPolled = false;
 
   function formatDuration(s) {
     var d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24,
@@ -386,7 +437,20 @@ var qrEncode = (function () {
     return sec + "s";
   }
 
+  function formatMinutes(min) {
+    var h = Math.floor(min / 60), m = min % 60;
+    var hs = h + (h == 1 ? " hour" : " hours"), ms = m + (m == 1 ? " minute" : " minutes");
+    return h && m ? hs + " " + ms : h ? hs : ms;
+  }
+
   function setText(id, text) { $(id).textContent = text; }
+
+  function hasTimer() { return view === "on" && info && info.timer != null; }
+
+  // Seconds left on the timer, counting down locally between polls.
+  function remaining() {
+    return Math.max(0, info.remaining - Math.floor((Date.now() - baseAt) / 1000));
+  }
 
   function render() {
     card.className = "card " + view;
@@ -405,14 +469,29 @@ var qrEncode = (function () {
       setText("version", info.version);
       setText("console", info.console);
       setText("since-label", info.active ? "On for" : "Off for");
-      setText("interval", info.active ? "Every " + info.interval + " seconds" : "Paused");
     }
     tick();
 
     var live = view === "on" || view === "off";
+    $("timer-controls").hidden = !live;
+    setText("timer-label", view === "off" ? "Turn on for" : "Keep awake for");
+    var pressed = null;
+    if (view === "on") pressed = info.timer == null ? 0 : info.timer;
+    var matched = false;
+    presets.forEach(function (b) {
+      var on = pressed !== null && +b.dataset.minutes === pressed;
+      matched = matched || on;
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.disabled = busy;
+    });
+    var customToggle = $("custom-toggle");
+    customToggle.setAttribute("aria-pressed", pressed !== null && !matched ? "true" : "false");
+    customToggle.setAttribute("aria-expanded", custom.hidden ? "false" : "true");
+    customToggle.disabled = busy;
+
     toggle.disabled = busy || view === "loading";
     toggle.className = view === "off" ? "primary" : "";
-    toggle.textContent = view === "on" ? "Turn off" : view === "off" ? "Turn on" : "Check again";
+    toggle.textContent = view === "on" ? "Turn off" : view === "off" ? "Turn on with no time limit" : "Check again";
     quit.hidden = !live;
     quit.disabled = busy;
     quit.className = quitTimer ? "link confirm" : "link";
@@ -425,7 +504,54 @@ var qrEncode = (function () {
     if ((view === "on" || view === "off") && info) {
       setText("since", formatDuration(baseSince + Math.floor((Date.now() - baseAt) / 1000)));
     }
+
+    var timed = hasTimer();
+    $("progress").hidden = !timed;
+    if (!timed) {
+      setText("timer", view === "on" ? "No time limit" : view === "off" ? "Off" : "–");
+      return;
+    }
+
+    var left = remaining();
+    var offAt = new Date(Date.now() + left * 1000)
+      .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    setText("timer", formatDuration(left) + " left · turns off at " + offAt);
+    setText("detail", "Keeping your " + info.console + " awake for " + formatMinutes(info.timer));
+    $("bar").style.width = (100 * left / (info.timer * 60)) + "%";
+
+    // When the timer runs out, the console turns itself off; refresh to show it.
+    if (left === 0 && !expiryPolled) {
+      expiryPolled = true;
+      setTimeout(poll, 1500);
+    }
   }
+
+  function startTimer(minutes) {
+    act(minutes ? "/on?minutes=" + minutes : "/on")
+      .then(function (data) { custom.hidden = true; apply(data); render(); })
+      .catch(poll);
+  }
+
+  presets.forEach(function (b) {
+    b.addEventListener("click", function () { startTimer(+b.dataset.minutes); });
+  });
+
+  $("custom-toggle").addEventListener("click", function () {
+    custom.hidden = !custom.hidden;
+    render();
+    if (!custom.hidden) $("custom-h").focus();
+  });
+
+  // The form is novalidate so this handler always runs and owns validation.
+  custom.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var h = $("custom-h"), m = $("custom-m");
+    var minutes = (parseInt(h.value, 10) || 0) * 60 + (parseInt(m.value, 10) || 0);
+    m.setCustomValidity(minutes < 1 || minutes > 10080 ? "Choose between 1 minute and 7 days" : "");
+    if (!custom.reportValidity()) return;
+    startTimer(minutes);
+  });
+  custom.addEventListener("input", function () { $("custom-m").setCustomValidity(""); });
 
   // The address phones should use: this page's own address, unless it was
   // opened on the console itself, where the console's LAN IP is needed.
@@ -457,6 +583,7 @@ var qrEncode = (function () {
     baseSince = data.since;
     baseAt = Date.now();
     view = data.active ? "on" : "off";
+    if (data.remaining) expiryPolled = false;
   }
 
   function request(method, path) {
