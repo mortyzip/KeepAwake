@@ -169,11 +169,28 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 }
 .custom input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .custom button { width: auto; padding: 11px 18px; }
-.setting { display: flex; align-items: center; gap: 16px; padding: 18px 20px; cursor: pointer; }
-.setting div { flex: 1; }
+.presets .wide { grid-column: 1 / -1; }
+.settings { padding: 20px 20px 6px; }
+.setting { display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.settings h2 + .setting { border-top: 0; margin-top: 4px; }
+.setting div { flex: 1; min-width: 0; }
 .setting strong { display: block; font-weight: 600; }
 .setting span { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
-.setting.error span { color: var(--danger); }
+.setting select {
+  flex: none;
+  font: inherit;
+  font-weight: 600;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+.setting select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.settings-error { color: var(--danger); font-size: 14px; margin: 0 0 14px; }
+.card.waiting .dot { animation: none; background: var(--accent-soft); }
+.card.waiting .dot::after { background: var(--accent); opacity: .45; }
 .switch {
   flex: none;
   appearance: none;
@@ -256,8 +273,11 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
       <div><dt id="since-label">On for</dt><dd id="since">–</dd></div>
       <div><dt>Console</dt><dd id="console">–</dd></div>
       <div class="wide">
-        <dt>Timer</dt><dd id="timer">–</dd>
+        <dt id="timer-dt">Timer</dt><dd id="timer">–</dd>
         <span class="progress" id="progress" hidden><span id="bar"></span></span>
+      </div>
+      <div class="wide" id="net-row" hidden>
+        <dt>Network</dt><dd id="net">–</dd>
       </div>
     </dl>
 
@@ -270,6 +290,7 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
         <button type="button" data-minutes="240">4 hours</button>
         <button type="button" data-minutes="0">No limit</button>
         <button type="button" id="custom-toggle" aria-expanded="false" aria-controls="custom">Custom</button>
+        <button type="button" class="wide" id="auto-mode">While transferring</button>
       </div>
       <form class="custom" id="custom" novalidate hidden>
         <label>Hours<input type="number" id="custom-h" min="0" max="168" step="1" inputmode="numeric" value="1"></label>
@@ -291,15 +312,48 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
     </div>
   </section>
 
-  <section class="card setting" id="setting" hidden>
-    <label for="open-on-start" style="display:contents">
-      <div>
-        <strong id="open-on-start-title">Open on the console at start</strong>
-        <span id="open-on-start-note">Shows this page on the TV each time you send the payload</span>
-      </div>
-    </label>
-    <input type="checkbox" class="switch" id="open-on-start" role="switch"
-           aria-labelledby="open-on-start-title" aria-describedby="open-on-start-note">
+  <section class="card settings" id="settings" hidden>
+    <h2>Settings</h2>
+    <div class="setting" id="open-setting">
+      <label for="open-on-start" style="display:contents">
+        <div>
+          <strong id="open-on-start-title">Open on the console at start</strong>
+          <span id="open-on-start-note">Shows this page on the TV each time you send the payload</span>
+        </div>
+      </label>
+      <input type="checkbox" class="switch" id="open-on-start" role="switch"
+             aria-labelledby="open-on-start-title" aria-describedby="open-on-start-note">
+    </div>
+    <div class="setting" id="threshold-setting">
+      <label for="threshold" style="display:contents">
+        <div>
+          <strong>Counts as transferring above</strong>
+          <span>For "While transferring", in either direction</span>
+        </div>
+      </label>
+      <select id="threshold">
+        <option value="100">100 KB/s</option>
+        <option value="500">500 KB/s</option>
+        <option value="1024">1 MB/s</option>
+        <option value="5120">5 MB/s</option>
+      </select>
+    </div>
+    <div class="setting" id="quiet-setting">
+      <label for="quiet" style="display:contents">
+        <div>
+          <strong>Stay awake after a transfer</strong>
+          <span>Covers pauses between files before the console can rest</span>
+        </div>
+      </label>
+      <select id="quiet">
+        <option value="2">2 minutes</option>
+        <option value="5">5 minutes</option>
+        <option value="10">10 minutes</option>
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+      </select>
+    </div>
+    <p class="settings-error" id="settings-error" hidden>Couldn't save that setting. Try again.</p>
   </section>
 
   <section class="card coffee" id="coffee">
@@ -517,21 +571,42 @@ var qrEncode = (function () {
     return h && m ? hs + " " + ms : h ? hs : ms;
   }
 
+  function formatRate(bytes) {
+    return bytes < 1048576 ? Math.round(bytes / 1024) + " KB/s" : (bytes / 1048576).toFixed(1) + " MB/s";
+  }
+
   function setText(id, text) { $(id).textContent = text; }
 
-  function hasTimer() { return view === "on" && info && info.timer != null; }
+  function mode() { return view === "on" && info ? info.mode : null; }
+
+  function hasTimer() { return mode() === "timer"; }
+
+  function elapsed() { return Math.floor((Date.now() - baseAt) / 1000); }
 
   // Seconds left on the timer, counting down locally between polls.
-  function remaining() {
-    return Math.max(0, info.remaining - Math.floor((Date.now() - baseAt) / 1000));
+  function remaining() { return Math.max(0, info.remaining - elapsed()); }
+
+  // In "While transferring", seconds of quiet left before the console can rest.
+  function quietLeft() { return Math.max(0, info.quiet_left - elapsed()); }
+
+  // Make sure a select can show a value set through the API.
+  function selectValue(select, value, label) {
+    var v = String(value), found = false;
+    for (var i = 0; i < select.options.length; i++) found = found || select.options[i].value === v;
+    if (!found) select.add(new Option(label, v));
+    select.value = v;
   }
 
   function render() {
-    card.className = "card " + view;
+    var waiting = mode() === "auto" && !info.auto_awake;
+    card.className = "card " + view + (waiting ? " waiting" : "");
     var name = info ? info.console : "console";
+    var onDetail = mode() !== "auto" ? "Keeping your " + name + " awake" :
+      waiting ? "Waiting for a transfer. Your " + name + " can rest" :
+      "Keeping your " + name + " awake while transferring";
     var texts = {
       loading: ["Connecting…", "Checking the console"],
-      on: ["On", "Keeping your " + name + " awake"],
+      on: ["On", onDetail],
       off: ["Off", "Your " + name + " can go into rest mode"],
       closed: ["Closed", "Keep Awake has stopped running"],
       lost: ["Not running", "Keep Awake isn't responding"]
@@ -550,7 +625,8 @@ var qrEncode = (function () {
     $("timer-controls").hidden = !live;
     setText("timer-label", view === "off" ? "Turn on for" : "Keep awake for");
     var pressed = null;
-    if (view === "on") pressed = info.timer == null ? 0 : info.timer;
+    if (mode() === "always") pressed = 0;
+    if (mode() === "timer") pressed = info.timer;
     var matched = false;
     presets.forEach(function (b) {
       var on = pressed !== null && +b.dataset.minutes === pressed;
@@ -562,6 +638,10 @@ var qrEncode = (function () {
     customToggle.setAttribute("aria-pressed", pressed !== null && !matched ? "true" : "false");
     customToggle.setAttribute("aria-expanded", custom.hidden ? "false" : "true");
     customToggle.disabled = busy;
+    var autoButton = $("auto-mode");
+    autoButton.setAttribute("aria-pressed", mode() === "auto" ? "true" : "false");
+    autoButton.disabled = busy || !(info && info.net);
+    autoButton.title = info && !info.net ? "Transfer detection isn't available on this console" : "";
 
     toggle.disabled = busy || view === "loading";
     toggle.className = view === "off" ? "primary" : "";
@@ -573,21 +653,37 @@ var qrEncode = (function () {
     $("note").hidden = view !== "closed" && view !== "lost";
     renderQr();
 
-    $("setting").hidden = !live || !info;
+    $("settings").hidden = !live || !info;
     if (info) {
       setText("open-on-start-title", "Open on the " + info.console + " at start");
-      if (!settingBusy) $("open-on-start").checked = info.open_on_start;
+      if (!settingBusy) {
+        $("open-on-start").checked = info.open_on_start;
+        selectValue($("threshold"), info.auto_threshold_kb, formatRate(info.auto_threshold_kb * 1024));
+        selectValue($("quiet"), info.auto_quiet_minutes, formatMinutes(info.auto_quiet_minutes));
+      }
+      $("threshold-setting").hidden = $("quiet-setting").hidden = !info.net;
     }
-    $("open-on-start").disabled = settingBusy;
+    ["open-on-start", "threshold", "quiet"].forEach(function (id) { $(id).disabled = settingBusy; });
+
+    $("net-row").hidden = !(live && info && info.net);
+    if (info && info.net) setText("net", "↓ " + formatRate(info.rx_rate) + "   ↑ " + formatRate(info.tx_rate));
   }
 
   function tick() {
     if ((view === "on" || view === "off") && info) {
-      setText("since", formatDuration(baseSince + Math.floor((Date.now() - baseAt) / 1000)));
+      setText("since", formatDuration(baseSince + elapsed()));
     }
 
     var timed = hasTimer();
     $("progress").hidden = !timed;
+    setText("timer-dt", mode() === "auto" ? "While transferring" : "Timer");
+
+    if (mode() === "auto") {
+      setText("timer", info.transferring ? "Transfer in progress" :
+        info.auto_awake && info.quiet_left != null ? "Quiet, can rest in " + formatDuration(quietLeft()) :
+        "Waiting for a transfer");
+      return;
+    }
     if (!timed) {
       setText("timer", view === "on" ? "No time limit" : view === "off" ? "Off" : "–");
       return;
@@ -634,24 +730,37 @@ var qrEncode = (function () {
   });
   custom.addEventListener("input", function () { $("custom-m").setCustomValidity(""); });
 
-  $("open-on-start").addEventListener("change", function (e) {
-    var want = e.target.checked;
+  $("auto-mode").addEventListener("click", function () {
+    act("/on?auto=1")
+      .then(function (data) { custom.hidden = true; apply(data); render(); })
+      .catch(poll);
+  });
+
+  function saveSetting(query) {
     settingBusy = true;
     render();
-    request("POST", "/settings?open_on_start=" + (want ? 1 : 0))
+    request("POST", "/settings?" + query)
       .then(function (data) {
         settingBusy = false;
-        $("setting").classList.remove("error");
-        setText("open-on-start-note", "Shows this page on the TV each time you send the payload");
+        $("settings-error").hidden = true;
         apply(data);
         render();
       })
       .catch(function () {
         settingBusy = false;
-        $("setting").classList.add("error");
-        setText("open-on-start-note", "Couldn't save this setting. Try again.");
+        $("settings-error").hidden = false;
         render();
       });
+  }
+
+  $("open-on-start").addEventListener("change", function (e) {
+    saveSetting("open_on_start=" + (e.target.checked ? 1 : 0));
+  });
+  $("threshold").addEventListener("change", function (e) {
+    saveSetting("auto_threshold_kb=" + e.target.value);
+  });
+  $("quiet").addEventListener("change", function (e) {
+    saveSetting("auto_quiet_minutes=" + e.target.value);
   });
 
   // The address phones should use: this page's own address, unless it was
@@ -711,7 +820,7 @@ var qrEncode = (function () {
     request("GET", "/status")
       .then(function (data) {
         if (!busy) { apply(data); render(); }
-        pollTimer = setTimeout(poll, 5000);
+        pollTimer = setTimeout(poll, 3000);
       })
       .catch(function () {
         if (view !== "closed") { view = "lost"; render(); }

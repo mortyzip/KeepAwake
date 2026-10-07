@@ -16,6 +16,7 @@ Download the payloads from the [Releases](https://github.com/mortyzip/KeepAwake/
 - **Start:** send the payload. The control page opens in the console's browser, and the toast shows its address for other devices, for example "Keep Awake v<version> enabled / Control it at http://192.168.1.50:9031". To stop the page opening on the console, switch off "Open on the PS5 at start" on the page. The setting is saved to `/data/keepawake.cfg`.
 - **Turn off and on:** use the control page. Turning it off lets the console go into rest mode, but the payload keeps running, so you can turn it back on from the page without sending the payload again.
 - **Timer:** pick 30 min, 1 hour, 2 hours or 4 hours on the page, or set your own (up to 7 days). When the time is up, Keep Awake turns itself off and shows a toast. The payload keeps running, so you can turn it back on from the page.
+- **While transferring:** keeps the console awake only while the network is busy, such as a download, an FTP transfer or a PKG install, then lets it rest. Rest mode suspends payloads, so this stops homebrew transfers from being cut off. See [While transferring](#while-transferring).
 - **Close:** use "Close Keep Awake" on the page (tap twice to confirm), or send the payload again. This ends the payload, so it needs sending again to start.
 
 Only one copy runs at a time. It uses TCP port 9031 to know whether it's already running.
@@ -27,21 +28,29 @@ While it's running, open `http://<console-ip>:9031` in a browser. The page shows
 - whether Keep Awake is on or off, and for how long,
 - which console it's on,
 - the time left on the timer, and when it will turn off,
-- quick timers (30 min, 1 hour, 2 hours, 4 hours, no limit) and a custom hours-and-minutes timer,
+- quick timers (30 min, 1 hour, 2 hours, 4 hours, no limit), a custom hours-and-minutes timer, and "While transferring",
+- the current download and upload speed,
 - a button to turn it on or off, and a link to close it,
 - a QR code for the page. Scan it from the TV or a computer with your phone's camera to control Keep Awake from your phone,
-- a switch for whether the page opens on the console when the payload starts.
+- settings: whether the page opens on the console when the payload starts, and the "While transferring" threshold and quiet period.
+
+### While transferring
+
+Every 2 seconds Keep Awake reads the console's network byte counters (all interfaces except loopback) and works out the speed over the last 10 seconds. While either direction is at or above the threshold (500 KB/s by default), it keeps the console awake. When the speed drops below it, Keep Awake waits for the quiet period (5 minutes by default) in case another file starts, then lets the console rest. The console shows a toast when a transfer is detected and when it can rest again.
+
+It can't tell a download from other traffic, so anything busy enough on the network keeps the console awake, Remote Play included. If the counters can't be read on a console, the page says so and the option is unavailable.
 
 The page also has a small HTTP API:
 
 | Request | Does |
 |---|---|
-| `GET /status` | Returns JSON: `version`, `console`, `active`, `uptime` and `since` (seconds since start and since it was last turned on or off), `timer` (timer length in minutes, or `null`), `remaining` (seconds left, or `null`), `interval`, `ip`, `port`, `open_on_start` |
+| `GET /status` | Returns JSON: `version`, `console`, `active`, `uptime` and `since` (seconds since start and since it was last turned on or off), `timer` (timer length in minutes, or `null`), `remaining` (seconds left, or `null`), `mode` (`always`, `timer`, `auto` or `off`), `net` (whether speeds can be read), `rx_rate` and `tx_rate` (bytes per second), `transferring`, `auto_awake`, `quiet_left` (seconds, or `null`), `interval`, `ip`, `port`, `open_on_start`, `auto_threshold_kb`, `auto_quiet_minutes` |
 | `POST /on` | Turns Keep Awake on with no time limit (removing any timer), and returns the status |
 | `POST /on?minutes=N` | Turns Keep Awake on for N minutes (1–10080), then off. Also changes the timer if it's already on |
+| `POST /on?auto=1` | Turns Keep Awake on in "While transferring" mode |
 | `POST /off` | Turns Keep Awake off without closing it, and returns the status |
 | `POST /quit` | Closes the payload |
-| `POST /settings?open_on_start=0` or `=1` | Sets whether the page opens on the console at start, saves it, and returns the status |
+| `POST /settings?…` | Changes any of `open_on_start` (0 or 1), `auto_threshold_kb` (10–102400) and `auto_quiet_minutes` (1–120), saves them, and returns the status |
 
 For example: `curl -X POST "http://<console-ip>:9031/on?minutes=90"`, or `make quit-ps5 PS5_HOST=<ps5-ip>`.
 
@@ -76,7 +85,7 @@ Then open http://localhost:9031.
 GitHub Actions builds both payloads on every push to `main`. To publish a release:
 
 1. Bump `VERSION` in the Makefile and commit it to `main`.
-2. Tag the commit and push the tag: `git tag v1.3.1 && git push origin v1.3.1`.
+2. Tag the commit and push the tag: `git tag v1.4.1 && git push origin v1.4.1`.
 
 The workflow builds the payloads and creates the GitHub Release with them attached. It fails if the tag doesn't match `VERSION`.
 

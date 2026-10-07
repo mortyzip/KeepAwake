@@ -74,8 +74,74 @@ web_sleep_ms(int ms) {
 }
 
 static long long
+web_uptime_ms(void) {
+  return (sceKernelGetProcessTime() - g_started) / 1000;
+}
+
+static long long
 web_uptime(void) {
-  return (sceKernelGetProcessTime() - g_started) / 1000000;
+  return web_uptime_ms() / 1000;
+}
+
+/* libPS4 has no getifaddrs(), so read the interface list straight from the
+   kernel with sysctl(NET_RT_IFLIST). Each interface comes as an if_msghdr
+   (FreeBSD 9 layout) holding its if_data counters. */
+#define KA_CTL_NET          4
+#define KA_PF_ROUTE         17
+#define KA_NET_RT_IFLIST    3
+#define KA_RTM_VERSION      5
+#define KA_RTM_IFINFO       0xe
+#define KA_IFF_LOOPBACK     0x8
+
+#define KA_IFM_FLAGS        8     // int ifm_flags
+#define KA_IFM_DATA         16    // struct if_data ifm_data
+#define KA_IFI_DATALEN      7     // u_char ifi_datalen, within if_data
+#define KA_IFI_IBYTES       72    // u_long ifi_ibytes, within if_data
+#define KA_IFI_OBYTES       80    // u_long ifi_obytes, within if_data
+#define KA_IF_DATA_SIZE     152   // sizeof(struct if_data) on FreeBSD 9
+
+static int
+web_net_bytes(unsigned long long *rx, unsigned long long *tx) {
+  static char buf[16384];
+  int mib[6] = {KA_CTL_NET, KA_PF_ROUTE, 0, 0, KA_NET_RT_IFLIST, 0};
+  size_t len = sizeof buf;
+  size_t off;
+  unsigned short msglen;
+  unsigned long long v;
+  int flags;
+  int found = 0;
+
+  *rx = *tx = 0;
+  if(sysctl(mib, 6, buf, &len, NULL, 0) != 0) {
+    return -1;
+  }
+
+  for(off = 0; off + 4 <= len; off += msglen) {
+    const unsigned char *m = (const unsigned char*)buf + off;
+    memcpy(&msglen, m, sizeof msglen);
+    if(msglen < 4 || off + msglen > len) {
+      break;
+    }
+    if(m[2] != KA_RTM_VERSION || m[3] != KA_RTM_IFINFO) {
+      continue;   // address messages follow each interface; skip them
+    }
+    // Only trust the layout if the message is the size we expect.
+    if(msglen < KA_IFM_DATA + KA_IF_DATA_SIZE ||
+       m[KA_IFM_DATA + KA_IFI_DATALEN] != KA_IF_DATA_SIZE) {
+      return -1;
+    }
+    memcpy(&flags, m + KA_IFM_FLAGS, sizeof flags);
+    if(flags & KA_IFF_LOOPBACK) {
+      continue;
+    }
+    memcpy(&v, m + KA_IFM_DATA + KA_IFI_IBYTES, sizeof v);
+    *rx += v;
+    memcpy(&v, m + KA_IFM_DATA + KA_IFI_OBYTES, sizeof v);
+    *tx += v;
+    found = 1;
+  }
+
+  return found ? 0 : -1;
 }
 
 static void

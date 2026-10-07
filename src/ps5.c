@@ -45,15 +45,15 @@ int sceSystemServiceLaunchWebBrowser(const char *uri, void *param);
 int sceUserServiceInitialize(void *param);
 
 
-static time_t g_started;
+static long long g_started_ms;
 
 
-static time_t
-now_seconds(void) {
+static long long
+now_ms(void) {
   struct timespec ts;
 
   clock_gettime(CLOCK_MONOTONIC, &ts);
-  return ts.tv_sec;
+  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 
@@ -100,8 +100,41 @@ web_sleep_ms(int ms) {
 }
 
 static long long
+web_uptime_ms(void) {
+  return now_ms() - g_started_ms;
+}
+
+static long long
 web_uptime(void) {
-  return now_seconds() - g_started;
+  return web_uptime_ms() / 1000;
+}
+
+static int
+web_net_bytes(unsigned long long *rx, unsigned long long *tx) {
+  struct ifaddrs *ifs;
+  struct ifaddrs *it;
+  struct if_data *data;
+  int found = 0;
+
+  *rx = *tx = 0;
+  if(getifaddrs(&ifs) != 0) {
+    return -1;
+  }
+
+  // The link-level (AF_LINK) entries carry each interface's counters.
+  for(it = ifs; it; it = it->ifa_next) {
+    if(!it->ifa_addr || it->ifa_addr->sa_family != AF_LINK || !it->ifa_data ||
+       (it->ifa_flags & IFF_LOOPBACK)) {
+      continue;
+    }
+    data = it->ifa_data;
+    *rx += data->ifi_ibytes;
+    *tx += data->ifi_obytes;
+    found = 1;
+  }
+
+  freeifaddrs(ifs);
+  return found ? 0 : -1;
 }
 
 static void
@@ -249,7 +282,7 @@ main(void) {
     return -1;
   }
 
-  g_started = now_seconds();
+  g_started_ms = now_ms();
   ka_load_settings();
 
   web_get_ip(ip, sizeof ip);
