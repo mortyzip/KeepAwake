@@ -6,6 +6,8 @@ Every 10 seconds it calls `sceSystemServicePowerTick()`, which resets the idle t
 
 ## Usage
 
+Download the payloads from the [Releases](https://github.com/mortyzip/KeepAwake/releases) page.
+
 | Console | File | Send to |
 |---|---|---|
 | PS5 | `keepawake_ps5_v<version>.elf` | ELF loader, port 9021 |
@@ -31,6 +33,15 @@ make test-ps4 PS4_HOST=<ps4-ip>
 Both builds need LLVM (`clang`, `ld.lld`, `llvm-objcopy`). The Makefile uses Homebrew's LLVM automatically when it's installed. Otherwise, set `LLVM_CONFIG` to your `llvm-config`.
 
 The version is set by `VERSION` in the [Makefile](Makefile). It goes into the filenames, where Payload Manager reads it, and into the toasts.
+
+## Releasing
+
+GitHub Actions builds both payloads on every push to `main`. To publish a release:
+
+1. Bump `VERSION` in the Makefile and commit it to `main`.
+2. Tag the commit and push the tag: `git tag v1.0.1 && git push origin v1.0.1`.
+
+The workflow builds the payloads and creates the GitHub Release with them attached. It fails if the tag doesn't match `VERSION`.
 
 ## Source
 

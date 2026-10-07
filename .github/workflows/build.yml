@@ -1,0 +1,80 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PS5_SDK_VERSION: v0.43
+  PS4_SDK_VERSION: v1.0.0
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install LLVM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18
+          echo "LLVM_CONFIG=llvm-config-18" >> "$GITHUB_ENV"
+
+      - name: Download SDKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          gh release download "$PS5_SDK_VERSION" -R ps5-payload-dev/sdk -p ps5-payload-sdk.zip
+          gh release download "$PS4_SDK_VERSION" -R Scene-Collective/ps4-payload-sdk -p ps4-payload-sdk.zip
+          unzip -q ps5-payload-sdk.zip
+          unzip -q ps4-payload-sdk.zip -d ps4-payload-sdk
+          echo "PS5_PAYLOAD_SDK=$RUNNER_TEMP/ps5-payload-sdk" >> "$GITHUB_ENV"
+          echo "PS4SDK=$RUNNER_TEMP/ps4-payload-sdk" >> "$GITHUB_ENV"
+
+      - name: Check tag matches Makefile version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version="v$(make -s version)"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Makefile VERSION ($version)"
+            exit 1
+          fi
+
+      - name: Build
+        run: make clean all
+
+      - name: Upload payloads
+        uses: actions/upload-artifact@v4
+        with:
+          name: payloads
+          path: |
+            keepawake_ps5_*.elf
+            keepawake_ps4_*.bin
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download payloads
+        uses: actions/download-artifact@v4
+        with:
+          name: payloads
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            keepawake_ps5_*.elf
+            keepawake_ps4_*.bin
+          fail_on_unmatched_files: true
