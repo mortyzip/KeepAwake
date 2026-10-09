@@ -35,6 +35,7 @@ While it's running, open `http://<console-ip>:9031` in a browser. The page shows
 - a button to turn it on or off, and a link to close it,
 - a QR code for the page. Scan it from the TV or a computer with your phone's camera to control Keep Awake from your phone,
 - settings: whether the page opens on the console when the payload starts, and the "While transferring" threshold and quiet period.
+- appearance: light, dark, or auto (light from 7 am to 7 pm, dark otherwise). It's remembered per browser, so your phone and the console can differ.
 
 ### While transferring
 

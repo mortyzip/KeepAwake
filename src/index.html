@@ -3,8 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
 <title>Keep Awake</title>
+<script>
+/* Set the theme before the first paint so there's no flash. The same logic
+   runs again below for changes. Auto is light from 7 am to 7 pm. */
+(function () {
+  var pref = "auto";
+  try { pref = localStorage.getItem("theme") || "auto"; } catch (e) {}
+  var h = new Date().getHours();
+  var dark = pref === "dark" || (pref === "auto" && (h < 7 || h >= 19));
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.style.colorScheme = dark ? "dark" : "light";
+})();
+</script>
 <style>
 :root {
   --bg: #f4f5f7;
@@ -19,20 +30,18 @@
   --danger-soft: rgba(201, 58, 58, .1);
   --off: #9aa1ab;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1014;
-    --card: #171a20;
-    --text: #eef0f3;
-    --muted: #9aa1ad;
-    --line: #262a32;
-    --accent: #2fd3a0;
-    --accent-ink: #062a1f;
-    --accent-soft: rgba(47, 211, 160, .14);
-    --danger: #ff6b6b;
-    --danger-soft: rgba(255, 107, 107, .12);
-    --off: #5f6672;
-  }
+:root[data-theme="dark"] {
+  --bg: #0e1014;
+  --card: #171a20;
+  --text: #eef0f3;
+  --muted: #9aa1ad;
+  --line: #262a32;
+  --accent: #2fd3a0;
+  --accent-ink: #062a1f;
+  --accent-soft: rgba(47, 211, 160, .14);
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, .12);
+  --off: #5f6672;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -221,6 +230,11 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 .switch:disabled { opacity: .6; cursor: default; }
 .switch:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .switch, .switch::after { transition: none; } }
+.appearance { padding: 20px; }
+.appearance p { color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+.segments { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+.segments button { padding: 10px 6px; font-size: 15px; }
+.segments button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .coffee { display: flex; align-items: center; gap: 20px; padding: 20px; }
 .coffee > div { flex: 1; }
 .coffee p { color: var(--muted); font-size: 14px; margin: 4px 0 12px; }
@@ -348,6 +362,16 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
       </select>
     </label>
     <p class="settings-error" id="settings-error" hidden>Couldn't save that setting. Try again.</p>
+  </section>
+
+  <section class="card appearance">
+    <h2 id="appearance-title">Appearance</h2>
+    <div class="segments" role="group" aria-labelledby="appearance-title">
+      <button type="button" data-mode="light">Light</button>
+      <button type="button" data-mode="dark">Dark</button>
+      <button type="button" data-mode="auto">Auto</button>
+    </div>
+    <p id="appearance-note"></p>
   </section>
 
   <section class="card coffee" id="coffee">
@@ -547,6 +571,34 @@ var qrEncode = (function () {
   var view = "loading", info = null, baseSince = 0, baseAt = 0;
   var pollTimer = null, quitTimer = null, busy = false, shownUrl = null, expiryPolled = false;
   var settingBusy = false;
+
+  // Appearance: light, dark, or auto (light by day, dark at night). The first
+  // script in <head> applies the saved choice before the page paints.
+  var DAY_START = 7, NIGHT_START = 19;   // hours, in the browser's local time
+  var themeButtons = Array.prototype.slice.call(document.querySelectorAll(".segments [data-mode]"));
+
+  function savedTheme() {
+    try { return localStorage.getItem("theme") || "auto"; } catch (e) { return "auto"; }
+  }
+
+  function applyTheme() {
+    var pref = savedTheme(), h = new Date().getHours();
+    var dark = pref === "dark" || (pref === "auto" && (h < DAY_START || h >= NIGHT_START));
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    themeButtons.forEach(function (b) {
+      b.setAttribute("aria-pressed", b.dataset.mode === pref ? "true" : "false");
+    });
+    setText("appearance-note", pref === "auto" ?
+      "Light from " + DAY_START + " am to " + (NIGHT_START - 12) + " pm, dark at night." : "");
+  }
+
+  themeButtons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      try { localStorage.setItem("theme", b.dataset.mode); } catch (e) {}
+      applyTheme();
+    });
+  });
 
   function formatDuration(s) {
     var d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24,
@@ -862,6 +914,8 @@ var qrEncode = (function () {
   });
 
   setInterval(tick, 1000);
+  setInterval(applyTheme, 60 * 1000);   // auto switches at 7 am and 7 pm
+  applyTheme();
   poll();
 })();
 </script>
