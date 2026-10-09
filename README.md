@@ -25,7 +25,7 @@ There is no password. Anyone on your network can open the page and use the API. 
 
 ### Control page
 
-While it's running, open `http://<console-ip>:9031` in a browser. The page shows:
+While it's running, open `http://<console-ip>:9031` in a browser. The layout adapts to the screen: one column on a phone, two on a tablet, three on a computer or TV, so it fits without scrolling. The page shows:
 
 - whether Keep Awake is on or off, and for how long,
 - which console it's on,

@@ -54,12 +54,18 @@ body {
   justify-content: center;
   padding: 40px 16px;
 }
-main { width: 100%; max-width: 420px; }
+main {
+  width: 100%;
+  max-width: 420px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
 }
 h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
 h2 { font-size: 16px; font-weight: 650; margin: 0; }
@@ -76,7 +82,6 @@ h2 { font-size: 16px; font-weight: 650; margin: 0; }
   border-radius: 18px;
   padding: 28px 24px 24px;
 }
-.card + .card { margin-top: 16px; }
 .status { display: flex; align-items: center; gap: 16px; }
 .dot {
   flex: none;
@@ -265,6 +270,57 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 .qr svg { display: block; width: 100%; height: 100%; }
 .url { font-size: 14px; font-weight: 600; word-break: break-all; }
 [hidden] { display: none !important; }
+
+/* Wider screens (tablets, computers, the console's own browser) lay the cards
+   out in columns so the page fits without scrolling. A phone keeps one column. */
+@media (min-width: 640px) {
+  body { padding: 20px 24px; }
+  main {
+    max-width: 860px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto auto auto 1fr auto auto;
+    grid-template-areas:
+      "head head"
+      "status settings"
+      "status appearance"
+      "status phone"
+      "coffee coffee"
+      "note note";
+  }
+  header { grid-area: head; }
+  #card { grid-area: status; }
+  #settings { grid-area: settings; }
+  .appearance { grid-area: appearance; }
+  #phone { grid-area: phone; }
+  #coffee { grid-area: coffee; }
+  #note { grid-area: note; }
+  dl { margin: 18px 0; }
+  .presets { margin-bottom: 12px; }
+}
+@media (min-width: 1100px) {
+  main {
+    max-width: 1180px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-areas:
+      "head head head"
+      "status settings phone"
+      "status settings coffee"
+      "status appearance ."
+      "note note note";
+  }
+}
+/* Short screens (a laptop, a TV browser): trim the spacing so it still fits. */
+@media (min-width: 1100px) and (max-height: 800px) {
+  body { padding-top: 12px; padding-bottom: 12px; }
+  main { gap: 12px; }
+  #card { padding: 22px 24px 18px; }
+  dl { margin: 14px 0; }
+}
+/* Big screens such as a TV: scale everything up. */
+@supports (zoom: 1) {
+  @media (min-width: 1700px) { main { zoom: 1.25; } }
+}
 </style>
 </head>
 <body>
