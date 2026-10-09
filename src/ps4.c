@@ -1,8 +1,4 @@
-/* KeepAwake (PS4) - keep the PS4 out of rest mode while this payload is running.
-
-   Same behaviour as the PS5 build: the idle timer is reset by periodically
-   calling sceSystemServicePowerTick(), and a control page is served on TCP
-   port 9031 (see web.h).
+/* KeepAwake (PS4) - same as the PS5 build, see ps5.c.
 
    libPS4 has no select(), so the control socket is non-blocking and polled
    ten times a second. */
@@ -14,8 +10,6 @@
 #define KEEPAWAKE_VERSION       "dev"
 #endif
 
-#define KEEPAWAKE_PORT          9031
-#define KEEPAWAKE_TICK_SECONDS  10
 #define KEEPAWAKE_POLL_MS       100
 
 #define SCE_NET_SO_RCVTIMEO     0x1006
@@ -43,7 +37,9 @@ resolve_power_tick(void) {
 
 static int
 would_block(int rc) {
-  return (unsigned int)rc == SCE_NET_ERROR_EAGAIN || sce_net_errno == SCE_NET_EAGAIN;
+  // Only a plain -1 leaves the reason in errno; anything else is a full code.
+  return (unsigned int)rc == SCE_NET_ERROR_EAGAIN ||
+         (rc == -1 && sce_net_errno == SCE_NET_EAGAIN);
 }
 
 
@@ -171,8 +167,7 @@ make_addr(struct sockaddr_in *addr, unsigned int ip) {
 }
 
 
-/* Runs on its own thread, so the control page is served even if launching
-   the browser blocks. */
+/* On its own thread so a slow browser launch doesn't hold up the page. */
 static void*
 open_browser_thread(void *arg) {
   static char url[64];

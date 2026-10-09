@@ -173,9 +173,9 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 .settings { padding: 20px 20px 6px; }
 .setting { display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--line); cursor: pointer; }
 .settings h2 + .setting { border-top: 0; margin-top: 4px; }
-.setting div { flex: 1; min-width: 0; }
+.setting .text { flex: 1; min-width: 0; }
 .setting strong { display: block; font-weight: 600; }
-.setting span { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+.setting small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
 .setting select {
   flex: none;
   font: inherit;
@@ -314,37 +314,31 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 
   <section class="card settings" id="settings" hidden>
     <h2>Settings</h2>
-    <div class="setting" id="open-setting">
-      <label for="open-on-start" style="display:contents">
-        <div>
-          <strong id="open-on-start-title">Open on the console at start</strong>
-          <span id="open-on-start-note">Shows this page on the TV each time you send the payload</span>
-        </div>
-      </label>
+    <label class="setting">
+      <span class="text">
+        <strong id="open-on-start-title">Open on the console at start</strong>
+        <small id="open-on-start-note">Shows this page on the TV each time you send the payload</small>
+      </span>
       <input type="checkbox" class="switch" id="open-on-start" role="switch"
              aria-labelledby="open-on-start-title" aria-describedby="open-on-start-note">
-    </div>
-    <div class="setting" id="threshold-setting">
-      <label for="threshold" style="display:contents">
-        <div>
-          <strong>Counts as transferring above</strong>
-          <span>For "While transferring", in either direction</span>
-        </div>
-      </label>
+    </label>
+    <label class="setting" id="threshold-setting">
+      <span class="text">
+        <strong>Counts as transferring above</strong>
+        <small>For "While transferring", in either direction</small>
+      </span>
       <select id="threshold">
         <option value="100">100 KB/s</option>
         <option value="500">500 KB/s</option>
         <option value="1024">1 MB/s</option>
         <option value="5120">5 MB/s</option>
       </select>
-    </div>
-    <div class="setting" id="quiet-setting">
-      <label for="quiet" style="display:contents">
-        <div>
-          <strong>Stay awake after a transfer</strong>
-          <span>Covers pauses between files before the console can rest</span>
-        </div>
-      </label>
+    </label>
+    <label class="setting" id="quiet-setting">
+      <span class="text">
+        <strong>Stay awake after a transfer</strong>
+        <small>Covers pauses between files before the console can rest</small>
+      </span>
       <select id="quiet">
         <option value="2">2 minutes</option>
         <option value="5">5 minutes</option>
@@ -352,7 +346,7 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
         <option value="15">15 minutes</option>
         <option value="30">30 minutes</option>
       </select>
-    </div>
+    </label>
     <p class="settings-error" id="settings-error" hidden>Couldn't save that setting. Try again.</p>
   </section>
 
@@ -370,11 +364,12 @@ button.link.confirm { color: var(--danger); font-weight: 600; }
 </main>
 
 <script>
-/* QR-BEGIN
-   Minimal QR code encoder: byte mode, error correction level M,
-   versions 1-6 (up to 106 bytes). Follows the structure of Project Nayuki's
-   QR Code generator. qrEncode(text, mask?) returns a square array of rows of
-   booleans (true = dark). */
+/* Small QR code encoder: byte mode, error correction level M, versions 1-6
+   (up to 106 bytes). Based on Project Nayuki's QR Code generator,
+   Copyright (c) Project Nayuki, MIT License (see LICENSE).
+   https://www.nayuki.io/page/qr-code-generator-library
+   qrEncode(text) returns rows of booleans, true = dark. Throws if the text
+   doesn't fit. */
 var qrEncode = (function () {
   var ECC = [0, 10, 16, 26, 18, 24, 16];   // EC codewords per block, level M
   var BLOCKS = [0, 1, 1, 1, 2, 2, 4];      // number of blocks, level M
@@ -409,7 +404,7 @@ var qrEncode = (function () {
     return r;
   }
 
-  return function (text, forceMask) {
+  return function (text) {
     var bytes = Array.prototype.slice.call(new TextEncoder().encode(text));
     for (var v = 1; v <= 6 && bytes.length + 2 > dataCodewords(v); v++);
     if (v > 6) throw new Error("text too long for QR");
@@ -532,20 +527,17 @@ var qrEncode = (function () {
       return score;
     }
 
-    var best = forceMask, bestScore = Infinity;
-    if (best === undefined) {
-      for (var m = 0; m < 8; m++) {
-        applyMask(m); drawFormat(m);
-        var s = penalty();
-        if (s < bestScore) { best = m; bestScore = s; }
-        applyMask(m);
-      }
+    var best = 0, bestScore = Infinity;
+    for (var m = 0; m < 8; m++) {
+      applyMask(m); drawFormat(m);
+      var s = penalty();
+      if (s < bestScore) { best = m; bestScore = s; }
+      applyMask(m);
     }
     applyMask(best); drawFormat(best);
     return mod;
   };
 })();
-/* QR-END */
 </script>
 <script>
 (function () {
@@ -780,7 +772,13 @@ var qrEncode = (function () {
     if (!url || url === shownUrl) return;
     shownUrl = url;
 
-    $("qr").innerHTML = qrSvg(url);
+    try {
+      $("qr").innerHTML = qrSvg(url);
+    } catch (e) {
+      // Address too long for the encoder: show the link only.
+      $("qr").innerHTML = "";
+    }
+    $("qr").hidden = !$("qr").innerHTML;
     setText("url", url.replace(/\/$/, ""));
   }
 
@@ -815,10 +813,12 @@ var qrEncode = (function () {
       .then(function (r) { if (!r.ok) throw r; return r.json(); });
   }
 
+  // A failed poll stops polling and shows "Not running"; "Check again" restarts it.
   function poll() {
     clearTimeout(pollTimer);
     request("GET", "/status")
       .then(function (data) {
+        if (view === "closed") return;
         if (!busy) { apply(data); render(); }
         pollTimer = setTimeout(poll, 3000);
       })

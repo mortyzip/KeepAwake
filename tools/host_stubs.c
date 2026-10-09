@@ -7,6 +7,7 @@
 
 int
 sceKernelSendNotificationRequest(int device, void *req, size_t size, int blocking) {
+  (void)device; (void)req; (void)size; (void)blocking;
   return 0;
 }
 
@@ -21,12 +22,14 @@ sceSystemServicePowerTick(void) {
 
 int
 sceUserServiceInitialize(void *param) {
+  (void)param;
   return 0;
 }
 
 
 int
 sceSystemServiceLaunchWebBrowser(const char *uri, void *param) {
+  (void)param;
   printf("[KeepAwake] open browser: %s\n", uri);
   fflush(stdout);
   return 0;

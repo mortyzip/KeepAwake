@@ -1,14 +1,13 @@
 /* State and tiny HTTP server for the KeepAwake control page, shared by the
    PS5 and PS4 builds.
 
-   Keep Awake can be on (resetting the idle timer) or off (paused, payload
-   still running so it can be turned back on from the page). When on, it
-   runs in one of three modes:
-     always    with no time limit
+   Keep Awake is either on (resetting the idle timer) or off (payload still
+   running, so the page can turn it back on). When on it runs in one of
+   three modes:
+     always    no time limit
      timer     for a set time, then it turns itself off
-     auto      only while the network is busy (a download, FTP transfer,
-               PKG install...), plus a quiet period after it stops
-   Quitting ends the payload.
+     auto      only while the network is busy (download, FTP, PKG install),
+               plus a quiet period after it stops
 
    Routes:
      GET  /                  the control page (src/index.html)
@@ -22,17 +21,24 @@
                              change any of the settings (saved to
                              KEEPAWAKE_SETTINGS)
 
+   POSTs that carry an Origin header from another host are refused, so a web
+   page open elsewhere on the network can't drive the console.
+
    The platform source defines WEB_CONSOLE ("PS5" or "PS4") before including
-   this file, and implements the functions declared below. Client sockets are
-   expected to be non-blocking. */
+   this file and implements the functions declared below. Client sockets must
+   be non-blocking. */
 
 #include "index_html.h"
 
 
+#define KEEPAWAKE_PORT          9031
+#define KEEPAWAKE_TICK_SECONDS  10
+
 #define WEB_AGAIN       -1
 #define WEB_ERROR       -2
 
-#define WEB_TIMEOUT_MS  2000
+// Requests are handled one at a time, so don't let a slow client hold on long.
+#define WEB_TIMEOUT_MS  1000
 #define WEB_POLL_MS     10
 
 
@@ -44,15 +50,15 @@ static int web_send(int fd, const void *buf, size_t len);
 
 static void web_sleep_ms(int ms);
 
-/* Seconds and milliseconds since the payload started. */
+/* Time since the payload started. */
 static long long web_uptime(void);
 static long long web_uptime_ms(void);
 
-/* The console's LAN IP address as text, or an empty string if unknown. */
+/* The console's LAN IP address, or an empty string if unknown. */
 static void web_get_ip(char *buf, size_t size);
 
-/* Total bytes received and sent on all non-loopback interfaces.
-   Returns 0, or -1 if the counters can't be read. */
+/* Bytes received and sent on all non-loopback interfaces. Returns -1 if the
+   counters can't be read. */
 static int web_net_bytes(unsigned long long *rx, unsigned long long *tx);
 
 /* Show a toast on the console. */
@@ -84,9 +90,7 @@ static long long ka_quiet_minutes = 5;     // stay awake this long after a trans
 #define KA_MAX_QUIET_MINUTES  120
 
 
-/* --- Settings ------------------------------------------------------------ */
-
-/* Find "key=<number>" in the settings text. Returns 1 if found. */
+/* Find "key=<number>" at the start of a line. Returns 1 if found. */
 static int
 ka_cfg_number(const char *buf, const char *key, long long *value) {
   const char *p = buf;
@@ -94,16 +98,18 @@ ka_cfg_number(const char *buf, const char *key, long long *value) {
   long long n = 0;
   int digits = 0;
 
-  while((p = strstr((char*)p, (char*)key))) {
+  while((p = strstr(p, key))) {
     if((p == buf || p[-1] == '\n') && p[k] == '=') {
-      for(p += k + 1; *p >= '0' && *p <= '9' && digits < 9; p++, digits++) {
+      for(p += k + 1; *p >= '0' && *p <= '9'; p++) {
+        if(++digits > 9) {
+          return 0;
+        }
         n = n * 10 + (*p - '0');
       }
       if(digits) {
         *value = n;
-        return 1;
       }
-      return 0;
+      return digits > 0;
     }
     p += k;
   }
@@ -164,12 +170,10 @@ ka_save_settings(void) {
 }
 
 
-/* --- Transfer detection --------------------------------------------------
-
-   Every KA_SAMPLE_MS the interface byte counters are sampled. The speed is
-   the change across the last KA_SAMPLES samples (about 10 seconds), which
-   smooths out bursty traffic. The network counts as busy while either
-   direction is at or above the threshold. */
+/* Transfer detection: the interface byte counters are sampled every
+   KA_SAMPLE_MS and the speed is the change over the last KA_SAMPLES samples
+   (about 10 seconds), which smooths out bursty traffic. The network counts
+   as busy while either direction is at or above the threshold. */
 
 #define KA_SAMPLES     6
 #define KA_SAMPLE_MS   2000
@@ -249,8 +253,7 @@ ka_sample(void) {
 }
 
 
-/* Seconds auto mode will keep the console awake for if nothing else is
-   transferred: the quiet period counting down since the last busy sample. */
+/* Seconds left of the quiet period since the last busy sample. */
 static long long
 ka_quiet_left(void) {
   long long left;
@@ -262,8 +265,6 @@ ka_quiet_left(void) {
   return left > 0 ? left : 0;
 }
 
-
-/* --- On and off ---------------------------------------------------------- */
 
 /* "1 hour 30 minutes", "2 hours", "45 minutes" */
 static void
@@ -292,8 +293,8 @@ ka_set_on(void) {
 }
 
 
-/* Turn on, for the given minutes or with no time limit (0). Also used to
-   change or remove the timer while already on. */
+/* Turn on for the given minutes, or with no time limit (0). Also changes or
+   removes the timer while already on. */
 static void
 ka_turn_on(long long minutes) {
   int was_plain_on = ka_active && !ka_until && !ka_auto;
@@ -316,7 +317,6 @@ ka_turn_on(long long minutes) {
 }
 
 
-/* Turn on in auto mode: awake only while transferring. */
 static void
 ka_turn_on_auto(void) {
   if(ka_active && ka_auto) {
@@ -351,10 +351,8 @@ ka_turn_off(const char *msg) {
 }
 
 
-/* --- HTTP ---------------------------------------------------------------- */
-
-/* Does the request line start with "<method> <path>", followed by a query
-   string or the end of the path? */
+/* Does the request line start with "<method> <path>", followed by a query or
+   the end of the path? */
 static int
 web_route(const char *req, size_t len, const char *method, const char *path) {
   size_t m = strlen(method);
@@ -370,8 +368,8 @@ web_route(const char *req, size_t len, const char *method, const char *path) {
 }
 
 
-/* Read a whole-number query parameter from the request line.
-   Returns 1 and sets *value if present and valid, 0 if absent, -1 if invalid. */
+/* Read a whole-number query parameter. Returns 1 and sets *value if it's
+   there and valid, 0 if absent, -1 if invalid. */
 static int
 web_query_number(const char *req, size_t len, const char *key, long long *value) {
   size_t k = strlen(key);
@@ -379,7 +377,7 @@ web_query_number(const char *req, size_t len, const char *key, long long *value)
   long long n = 0;
   int digits = 0;
 
-  // The query string runs from '?' to the space before "HTTP/1.x".
+  // The query runs from '?' to the space before "HTTP/1.x".
   for(i = 0; i < len && req[i] != '?' && req[i] != '\r'; i++);
   if(i >= len || req[i] != '?') {
     return 0;
@@ -513,11 +511,15 @@ web_handle_settings(int fd, const char *req, size_t len) {
   long long open_on_start = ka_open_on_start;
   long long threshold = ka_threshold_kb;
   long long quiet = ka_quiet_minutes;
-  int a = web_query_number(req, len, "open_on_start", &open_on_start);
-  int b = web_query_number(req, len, "auto_threshold_kb", &threshold);
-  int c = web_query_number(req, len, "auto_quiet_minutes", &quiet);
+  int old_open_on_start = ka_open_on_start;
+  long long old_threshold = ka_threshold_kb;
+  long long old_quiet = ka_quiet_minutes;
+  int got_open = web_query_number(req, len, "open_on_start", &open_on_start);
+  int got_threshold = web_query_number(req, len, "auto_threshold_kb", &threshold);
+  int got_quiet = web_query_number(req, len, "auto_quiet_minutes", &quiet);
 
-  if(a < 0 || b < 0 || c < 0 || (a + b + c) == 0 ||
+  if(got_open < 0 || got_threshold < 0 || got_quiet < 0 ||
+     (got_open + got_threshold + got_quiet) == 0 ||
      open_on_start > 1 ||
      threshold < KA_MIN_THRESHOLD_KB || threshold > KA_MAX_THRESHOLD_KB ||
      quiet < KA_MIN_QUIET_MINUTES || quiet > KA_MAX_QUIET_MINUTES) {
@@ -526,10 +528,6 @@ web_handle_settings(int fd, const char *req, size_t len) {
                      "auto_threshold_kb=10-102400 or auto_quiet_minutes=1-120\"}");
     return;
   }
-
-  int old_open_on_start = ka_open_on_start;
-  long long old_threshold = ka_threshold_kb;
-  long long old_quiet = ka_quiet_minutes;
 
   ka_open_on_start = (int)open_on_start;
   ka_threshold_kb = threshold;
@@ -548,8 +546,8 @@ web_handle_settings(int fd, const char *req, size_t len) {
 }
 
 
-/* Read the request headers, giving up after WEB_TIMEOUT_MS so a slow or idle
-   client can't hold up the keep-awake loop. Returns the bytes read. */
+/* Read the request headers, giving up after WEB_TIMEOUT_MS. Returns the
+   bytes read. */
 static size_t
 web_read_request(int fd, char *buf, size_t size) {
   size_t len = 0;
@@ -580,17 +578,72 @@ web_read_request(int fd, char *buf, size_t size) {
 }
 
 
+/* Does the line at p start with "<name>:", ignoring case? */
+static int
+web_header_is(const char *p, const char *name) {
+  for(; *name; p++, name++) {
+    if((*p | 0x20) != (*name | 0x20)) {
+      return 0;
+    }
+  }
+  return *p == ':';
+}
+
+
+/* Copy the value of a request header into out. Returns 1 if it's present. */
+static int
+web_header(const char *req, const char *name, char *out, size_t size) {
+  const char *p = req;
+  size_t i;
+
+  while((p = strstr(p, "\r\n"))) {
+    p += 2;
+    if(web_header_is(p, name)) {
+      for(p += strlen(name) + 1; *p == ' '; p++);
+      for(i = 0; *p && *p != '\r' && i < size - 1; i++, p++) {
+        out[i] = *p;
+      }
+      out[i] = 0;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+
+/* A browser sends Origin on cross-site POSTs. Refuse one that doesn't match
+   the host it was sent to; curl and the other instance send none. */
+static int
+web_origin_ok(const char *req) {
+  char origin[128];
+  char host[128];
+  const char *o;
+
+  if(!web_header(req, "Origin", origin, sizeof origin)) {
+    return 1;
+  }
+  o = strstr(origin, "://");
+  return o && web_header(req, "Host", host, sizeof host) &&
+         strlen(o + 3) == strlen(host) && memcmp(o + 3, host, strlen(host)) == 0;
+}
+
+
 /* Handle one client connection. Returns 1 if the payload should quit. */
 static int
 web_handle_client(int fd) {
-  char req[1024];
+  char req[2048];
   long long minutes = 0;
-  long long autom = 0;
+  long long auto_arg = 0;
   size_t len;
-  int rc;
-  int rc_auto;
+  int minutes_rc;
+  int auto_rc;
 
   if(!(len = web_read_request(fd, req, sizeof req))) {
+    return 0;
+  }
+
+  if(memcmp(req, "POST ", 5) == 0 && !web_origin_ok(req)) {
+    web_respond_json(fd, "403 Forbidden", "{\"error\":\"cross-origin request\"}");
     return 0;
   }
 
@@ -603,14 +656,14 @@ web_handle_client(int fd) {
     web_respond_status(fd);
 
   } else if(web_route(req, len, "POST", "/on")) {
-    rc = web_query_number(req, len, "minutes", &minutes);
-    rc_auto = web_query_number(req, len, "auto", &autom);
-    if(rc < 0 || minutes > KA_MAX_MINUTES || rc_auto < 0 || autom > 1 ||
-       (autom && minutes)) {
+    minutes_rc = web_query_number(req, len, "minutes", &minutes);
+    auto_rc = web_query_number(req, len, "auto", &auto_arg);
+    if(minutes_rc < 0 || minutes > KA_MAX_MINUTES || auto_rc < 0 ||
+       auto_arg > 1 || (auto_arg && minutes)) {
       web_respond_json(fd, "400 Bad Request",
                        "{\"error\":\"use minutes=0-10080 or auto=1\"}");
     } else {
-      if(autom) {
+      if(auto_arg) {
         ka_turn_on_auto();
       } else {
         ka_turn_on(minutes);
@@ -648,11 +701,9 @@ web_handle_client(int fd) {
 }
 
 
-/* --- Main loop ----------------------------------------------------------- */
-
-/* Call regularly from the main loop: samples the network, resets the idle
-   timer when it's due, and handles the timer and auto mode. Returns the
-   seconds until it next needs calling. */
+/* Call from the main loop. Samples the network, resets the idle timer when
+   it's due and handles the timer and auto mode. Returns the seconds until it
+   next needs calling. */
 static int
 ka_tick(void) {
   long long now = web_uptime();
@@ -698,7 +749,7 @@ ka_tick(void) {
 }
 
 
-/* The request a new instance sends to make the running one quit. */
+/* What a new instance sends to make the running one quit. */
 static const char web_quit_request[] =
   "POST /quit HTTP/1.0\r\n"
   "Host: localhost\r\n"

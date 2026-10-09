@@ -1,3 +1,5 @@
 *.o
+*.elf
+*.bin
 .DS_Store
 build/

@@ -61,6 +61,7 @@ $(PS4_BIN): src/ps4.c $(DEPS)
 
 # Runs the PS5 code on this computer with the console calls stubbed out, for
 # working on the control page: make host && ./build/keepawake_host
+# Needs BSD network headers (struct if_data), so macOS or BSD only.
 host: build/keepawake_host
 
 build/keepawake_host: src/ps5.c tools/host_stubs.c $(DEPS)

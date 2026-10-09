@@ -13,13 +13,15 @@ Download the payloads from the [Releases](https://github.com/mortyzip/KeepAwake/
 | PS5 | `keepawake_ps5_v<version>.elf` | ELF loader, port 9021 |
 | PS4 | `keepawake_ps4_v<version>.bin` | GoldHEN BinLoader, port 9090 |
 
-- **Start:** send the payload. The control page opens in the console's browser, and the toast shows its address for other devices, for example "Keep Awake v<version> enabled / Control it at http://192.168.1.50:9031". To stop the page opening on the console, switch off "Open on the PS5 at start" on the page. The setting is saved to `/data/keepawake.cfg`.
+- **Start:** send the payload. The control page opens in the console's browser, and the toast shows its address for other devices, for example "Keep Awake v<version> enabled / Control it at http://192.168.1.50:9031". To stop the page opening on the console, switch off "Open on the PS5/PS4 at start" on the page. The setting is saved to `/data/keepawake.cfg`.
 - **Turn off and on:** use the control page. Turning it off lets the console go into rest mode, but the payload keeps running, so you can turn it back on from the page without sending the payload again.
 - **Timer:** pick 30 min, 1 hour, 2 hours or 4 hours on the page, or set your own (up to 7 days). When the time is up, Keep Awake turns itself off and shows a toast. The payload keeps running, so you can turn it back on from the page.
 - **While transferring:** keeps the console awake only while the network is busy, such as a download, an FTP transfer or a PKG install, then lets it rest. Rest mode suspends payloads, so this stops homebrew transfers from being cut off. See [While transferring](#while-transferring).
 - **Close:** use "Close Keep Awake" on the page (tap twice to confirm), or send the payload again. This ends the payload, so it needs sending again to start.
 
 Only one copy runs at a time. It uses TCP port 9031 to know whether it's already running.
+
+There is no password. Anyone on your network can open the page and use the API. Browsers on other sites can't, since POSTs with a foreign `Origin` header are refused, but don't expose port 9031 outside your LAN.
 
 ### Control page
 
@@ -78,7 +80,7 @@ The page is [src/index.html](src/index.html). The build embeds it into both payl
 make host && ./build/keepawake_host
 ```
 
-Then open http://localhost:9031.
+Then open http://localhost:9031. This needs BSD network headers, so it builds on macOS or BSD, not Linux.
 
 ## Releasing
 
@@ -94,8 +96,12 @@ The workflow builds the payloads and creates the GitHub Release with them attach
 - [src/ps5.c](src/ps5.c): built with the [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk).
 - [src/ps4.c](src/ps4.c): built against libPS4 from the [Scene-Collective ps4-payload-sdk](https://github.com/Scene-Collective/ps4-payload-sdk). libPS4 has no `select()`, so this version checks for connections ten times a second.
 - [src/web.h](src/web.h): the HTTP server for the control page, shared by both.
-- [src/index.html](src/index.html): the control page, including a small QR code encoder (byte mode, error correction level M, up to 106 bytes).
+- [src/index.html](src/index.html): the control page, including a small QR code encoder (byte mode, error correction level M, up to 106 bytes) based on [Project Nayuki's](https://www.nayuki.io/page/qr-code-generator-library).
 
 ## Support
 
 Keep Awake is free. If it's useful to you, you can [buy me a coffee](https://buymeacoffee.com/mortyzip). The control page has a link too, or a QR code when it's open on the console.
+
+## License
+
+[MIT](LICENSE).

@@ -1,12 +1,9 @@
 /* KeepAwake - keep the PS5 out of rest mode while this payload is running.
 
-   The console's idle timer is reset by periodically calling
-   sceSystemServicePowerTick(). The payload also serves a control page on
-   TCP port 9031 (see web.h), which
-     - shows the status and turns Keep Awake on and off from a browser
-       (and opens in the PS5's browser at start, unless turned off),
-     - guarantees only one instance runs at a time, and
-     - lets a second copy of the payload close the running one. */
+   The idle timer is reset by calling sceSystemServicePowerTick() every few
+   seconds. A control page is served on TCP port 9031 (see web.h). Holding
+   that port also means only one instance runs, and a second copy of the
+   payload asks the running one to quit. */
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -28,9 +25,6 @@
 #ifndef KEEPAWAKE_VERSION
 #define KEEPAWAKE_VERSION       "dev"
 #endif
-
-#define KEEPAWAKE_PORT          9031
-#define KEEPAWAKE_TICK_SECONDS  10
 
 
 typedef struct notify_request {
@@ -166,8 +160,7 @@ web_notify(const char *msg) {
 }
 
 
-/* Runs on its own thread, so the control page is served even if launching
-   the browser blocks. */
+/* On its own thread so a slow browser launch doesn't hold up the page. */
 static void*
 open_browser_thread(void *arg) {
   char url[64];
@@ -315,6 +308,9 @@ main(void) {
 
     if(rc > 0 && FD_ISSET(srv, &fds)) {
       if((cli = accept(srv, NULL, NULL)) < 0) {
+        if(errno != EINTR && errno != ECONNABORTED) {
+          usleep(100 * 1000);   // e.g. out of descriptors: don't spin
+        }
         continue;
       }
       fcntl(cli, F_SETFL, fcntl(cli, F_GETFL) | O_NONBLOCK);
