@@ -2,8 +2,6 @@
 
 A PS5 and PS4 payload that stops the console from going into rest mode while it runs.
 
-Every 10 seconds it calls `sceSystemServicePowerTick()`, which resets the idle timer for auto rest mode.
-
 <p>
   <img src="docs/screenshot-light.png" alt="Control page, light theme" width="49%">
   <img src="docs/screenshot-dark.png" alt="Control page, dark theme" width="49%">
