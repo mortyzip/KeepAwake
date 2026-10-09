@@ -12,7 +12,8 @@ A PS5 and PS4 payload that stops the console from going into rest mode while it 
 **Phone**
 
 <p>
-  <img src="docs/screenshot-phone.png" alt="Control page on a phone, dark theme" width="240">
+  <img src="docs/screenshot-phone-light.png" alt="Control page on a phone, light theme" width="240">
+  <img src="docs/screenshot-phone-dark.png" alt="Control page on a phone, dark theme" width="240">
 </p>
 
 ## Usage
