@@ -1,5 +1,5 @@
 # Payload Manager reads the version from the filename, e.g. keepawake_ps5_v1.4.0.elf
-VERSION := 1.4.0
+VERSION := 1.5.0
 
 PS5_PAYLOAD_SDK ?= $(abspath ../ps5-payload-sdk)
 PS4SDK          ?= $(abspath ../ps4-payload-sdk)

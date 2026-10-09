@@ -4,6 +4,14 @@ A PS5 and PS4 payload that stops the console from going into rest mode while it 
 
 Every 10 seconds it calls `sceSystemServicePowerTick()`, which resets the idle timer for auto rest mode.
 
+<p>
+  <img src="docs/screenshot-light.png" alt="Control page, light theme" width="49%">
+  <img src="docs/screenshot-dark.png" alt="Control page, dark theme" width="49%">
+</p>
+<p align="center">
+  <img src="docs/screenshot-phone.png" alt="Control page on a phone" width="240">
+</p>
+
 ## Usage
 
 Download the payloads from the [Releases](https://github.com/mortyzip/KeepAwake/releases) page.
@@ -88,7 +96,7 @@ Then open http://localhost:9031. This needs BSD network headers, so it builds on
 GitHub Actions builds both payloads on every push to `main`. To publish a release:
 
 1. Bump `VERSION` in the Makefile and commit it to `main`.
-2. Tag the commit and push the tag: `git tag v1.4.1 && git push origin v1.4.1`.
+2. Tag the commit and push the tag: `git tag v1.5.1 && git push origin v1.5.1`.
 
 The workflow builds the payloads and creates the GitHub Release with them attached. It fails if the tag doesn't match `VERSION`.
 
