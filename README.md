@@ -117,4 +117,4 @@ Keep Awake is free. If it's useful to you, you can [buy me a coffee](https://buy
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). The QR code encoder is based on code from Project Nayuki, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
