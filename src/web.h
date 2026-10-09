@@ -98,7 +98,8 @@ ka_cfg_number(const char *buf, const char *key, long long *value) {
   long long n = 0;
   int digits = 0;
 
-  while((p = strstr(p, key))) {
+  // libPS4's strstr() takes plain char pointers.
+  while((p = strstr((char*)p, (char*)key))) {
     if((p == buf || p[-1] == '\n') && p[k] == '=') {
       for(p += k + 1; *p >= '0' && *p <= '9'; p++) {
         if(++digits > 9) {
@@ -596,7 +597,7 @@ web_header(const char *req, const char *name, char *out, size_t size) {
   const char *p = req;
   size_t i;
 
-  while((p = strstr(p, "\r\n"))) {
+  while((p = strstr((char*)p, (char*)"\r\n"))) {
     p += 2;
     if(web_header_is(p, name)) {
       for(p += strlen(name) + 1; *p == ' '; p++);
